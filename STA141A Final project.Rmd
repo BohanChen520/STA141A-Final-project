@@ -1,0 +1,1488 @@
+---
+title: "STA141A Final project"
+author: "Bohan Chen"
+output: html_document
+date: "2025-02-09"
+editor_options: 
+  markdown: 
+    wrap: sentence
+---
+
+```{r, echo=FALSE}
+
+
+
+session=list()
+for(i in 1:18){
+  session[[i]]=readRDS(paste('/Users/chenbohan/Desktop/Data/data/session',i,'.rds',sep=''))
+}
+```
+
+# 1. Abstract
+
+### This project analyzed neural and behavioral data from 18 experimental sessions involving mice performing perceptual decision-making tasks. This study explores how differences in visual contrast, decision bias, and neuronal firing rate affect task performance. A comprehensive descriptive analysis reveals uneven contrast distribution, potential bias, and that the greater the contrast difference, the higher the success rate. Reasoning analysis emphasizes the importance of late occurrence rate in predicting decision outcomes. The machine learning model (XGBoost) integrates cross session data to improve prediction accuracy, demonstrating the importance of neural and behavioral features in decision-making. The robustness of the research results was confirmed by excluding fatigue effects and comparing alternative models.
+
+# 2. Introduction
+
+### 1.Questions of Interest: The project aims to understand the decision-making behavior of mice in response to visual stimuli, specifically focusing on the impact of contrast levels on success rates and neural activity.
+
+### 2.Impact of Results: The findings could provide insights into neural mechanisms underlying decision-making and potential biases in animal behavior.
+
+### 3.Real-World Motivation: Understanding these mechanisms can contribute to neuroscience research and potentially inform models of human decision-making.
+
+### 4.Problem Setup: The problem involves analyzing neural data from mice performing a visual decision task, with data sourced from multiple sessions.
+
+### 5.Key Variables: Feedback type (success/failure), contrast levels (left and right), neural firing rates, and brain areas. 6.Hypotheses: Mice may show decision biases based on contrast levels, and neural activity may correlate with success rates.
+
+# 3. Background
+
+### 1.Source of Data: Neural data from mice performing a visual decision task.
+
+### 2.Target Population: Mice used in neuroscience experiments.
+
+### 3.Sampling Mechanism: Data collected across 18 sessions, each with multiple trials.
+
+### 4.Explanation of Variables: Feedback type, contrast levels, neural firing rates, and brain areas are explained.
+
+### 5.Relevant Research: The project builds on existing neuroscience research on decision-making and neural activity.
+
+# 4 Exploratory analysis
+
+## 4.1 Count the number of trials, neurons, and brain areas for each session, which let the results are stored in a data frame for easy viewing.
+
+```{r, echo=FALSE}
+trial_counts <- numeric(18)
+neuron_counts <- numeric(18)
+brain_area_counts <- numeric(18)
+
+for(i in 1:18){
+  trial_counts[i] <- length(session[[i]]$feedback_type)  # Number of trials
+  neuron_counts[i] <- length(session[[i]]$brain_area)  # Number of neurons
+  brain_area_counts[i] <- length(unique(session[[i]]$brain_area))  # Unique brain areas
+}
+
+data_summary <- data.frame(
+  Session = 1:18,
+  Trials = trial_counts,
+  Neurons = neuron_counts,
+  Brain_Areas = brain_area_counts
+)
+
+print(data_summary)
+```
+
+### 1. Trial Counts Across Sessions
+
+1.Early Sessions (1–10): There is a steady increase in trials until Session 10, reaching the highest count (447).
+This suggests that early experimental phases may have involved learning or adaptation.
+
+2.Later Sessions (11–18): Trial counts drop after Session 10, fluctuating between 216 (Session 18) and 404 (Session 15).
+The drop in later sessions might indicate task modifications, experimental adjustments, or cognitive fatigue in subjects.
+Sessions 15 and 11 have relatively higher trial counts, indicating possible secondary peaks in engagement.
+
+### 2. Neuron Counts Across Sessions
+
+1.High Neuron Count Sessions: Session 4 (1769 neurons) recorded the highest number of neurons, possibly due to specific experimental conditions.
+Sessions 6, 10, and 18 also have high neuron counts, suggesting key experimental milestones.
+
+2.Low Neuron Count Sessions: Session 16 has the lowest neuron count (474), followed by Sessions 7 and 17.
+A general decline in neuron count is observed after Session 10, potentially reflecting changes in task complexity, experimental setup, or adaptation.
+
+### 3. Brain Areas Across Sessions
+
+1.Most Diverse Brain Activity: Session 8 and 13 recorded the highest number of brain areas (15), providing a broader representation of neural activity.
+Sessions 9, 10, 12, and 14 also have a relatively high number of brain areas.
+
+2.Fewer Brain Areas: Sessions 2, 6, and 16 recorded the lowest number of brain areas (5–6).
+This may indicate more specialized neural engagement in those sessions.
+
+### Summarize the distribution of feedback_type, contrast_left, and contrast_right across sessions
+
+```{r, echo=FALSE}
+feedback_distribution <- unlist(lapply(session, function(x) table(x$feedback_type)))
+contrast_left_distribution <- unlist(lapply(session, function(x) table(x$contrast_left)))
+contrast_right_distribution <- unlist(lapply(session, function(x) table(x$contrast_right)))
+
+# Print summaries
+print("Feedback Type Distribution:")
+print(feedback_distribution)
+
+print("Left Contrast Distribution:")
+print(contrast_left_distribution)
+
+print("Right Contrast Distribution:")
+print(contrast_right_distribution)
+```
+
+## 4.2 Visualize the distribution of contrast_left and contrast_right
+
+```{r, echo=FALSE}
+library(ggplot2)
+
+# Combine contrast values from all sessions
+all_contrast_left <- unlist(lapply(session, function(x) x$contrast_left))
+all_contrast_right <- unlist(lapply(session, function(x) x$contrast_right))
+
+# Create histograms
+ggplot(data.frame(Contrast = all_contrast_left), aes(x = Contrast)) +
+  geom_histogram(binwidth = 0.1, fill="blue", alpha=0.7) +
+  ggtitle("Distribution of Left Contrast Levels") +
+  xlab("Contrast Level") + ylab("Count")
+
+ggplot(data.frame(Contrast = all_contrast_right), aes(x = Contrast)) +
+  geom_histogram(binwidth = 0.1, fill="red", alpha=0.7) +
+  ggtitle("Distribution of Right Contrast Levels") +
+  xlab("Contrast Level") + ylab("Count")
+```
+
+### 1. Uneven Contrast Distributions
+
+1.The majority of trials have contrast_left = 0 and contrast_right = 0, meaning that a large proportion of trials had no stimulus presented on either side.
+This suggests that a significant portion of trials may be "control" trials, where mice had to make a decision in the absence of visual cues.
+
+2.
+There is a noticeable drop at contrast = 0.25, followed by a slight increase at contrast = 0.5 and contrast = 1.0, suggesting a non-uniform trial design.
+Left vs. Right Contrast Are Similar but Not Identical.
+
+3.
+The overall shape of the left contrast and right contrast distributions appear similar.
+However, small differences in bar heights suggest that one side might have been slightly more biased toward certain contrast levels in some sessions.
+This could impact mouse decision-making behavior, as slight imbalances might introduce side preferences.
+
+## 4.3 Success rate for each contrast level combination among different mice
+
+```{r, echo=FALSE}
+# Load necessary libraries
+library(dplyr)
+library(tidyr)
+
+# Define all possible contrast level combinations
+contrast_combinations <- expand.grid(
+  contrast_left = c(0, 0.25, 0.5, 1),
+  contrast_right = c(0, 0.25, 0.5, 1)
+)
+
+# Function to compute success rates for each contrast level per mouse
+compute_success_rates <- function(session_data) {
+  # Combine all session data
+  all_data <- do.call(rbind, lapply(session_data, function(x) {
+    data.frame(
+      mouse_name = x$mouse_name[1],
+      contrast_left = x$contrast_left,
+      contrast_right = x$contrast_right,
+      success = as.numeric(x$feedback_type == 1)
+    )
+  }))
+  
+  # Compute success rate for each contrast level per mouse
+  success_rates <- all_data %>%
+    group_by(mouse_name, contrast_left, contrast_right) %>%
+    summarise(success_rate = mean(success, na.rm = TRUE), .groups = "drop")
+  
+  # Ensure all contrast combinations are included
+  success_rates <- right_join(contrast_combinations, success_rates, by = c("contrast_left", "contrast_right")) %>%
+    arrange(mouse_name, contrast_left, contrast_right)
+  
+  return(success_rates)
+}
+
+# Compute success rates using session data
+success_rates_df <- compute_success_rates(session)
+
+# Print results
+print(success_rates_df)
+
+# Optionally, plot success rates for visualization
+library(ggplot2)
+
+ggplot(success_rates_df, aes(x = factor(contrast_left), y = success_rate, fill = factor(contrast_right))) +
+  geom_bar(stat = "identity", position = "dodge") +
+  facet_wrap(~mouse_name) +
+  labs(title = "Success Rates Across Contrast Levels by Mouse",
+       x = "Left Contrast",
+       y = "Success Rate",
+       fill = "Right Contrast") +
+  theme_minimal()
+
+
+```
+
+### 1. Contrast Difference Matters
+
+```         
+1.Success rates tend to be higher when the contrast difference between the left and right sides is large (e.g., left = 1, right = 0).
+
+2.Success rates drop when the contrast is more balanced (e.g., left = 0.25, right = 0.25).
+
+3.This aligns with the idea that mice find it easier to make decisions when the stimulus difference is strong.
+```
+
+### 2. Individual Mouse Variability
+
+```         
+1.Cori & Hench show relatively consistent performance across conditions but have noticeable drops at certain contrast levels.
+
+2.Forssmann has a significant success rate boost when right contrast is 1, suggesting a potential right-side bias.
+
+3.Lederberg has the highest success rates when the left contrast is 0 and the right contrast is 0.25 or 0.5, indicating that lower left contrast might be beneficial for this mouse.
+```
+
+### 3. Effect of Right Contrast
+
+```         
+1.When right contrast is 0, success rates tend to be high, especially for Forssmann and Hench.
+
+2.When right contrast is 1, success rates drop for some conditions, showing that mice might struggle with extreme right contrast.
+
+3.Potential Biases
+Some mice, such as Forssmann, seem to perform better when the right contrast is high, potentially indicating a side preference.
+Lederberg shows a different pattern, where certain left contrast values (like 1) seem to boost performance regardless of the right contrast.
+```
+
+## 4.4 Test for decision biases in ambiguous contrast conditions (e.g., when left contrast ≈ right contrast), we will: Filter trials where left contrast ≈ right contrast (e.g., both 0, both 0.25, both 0.5, both 1).
+
+```{r, echo=FALSE}
+# Load necessary libraries
+library(dplyr)
+library(ggplot2)
+
+# Identify ambiguous trials where left contrast ≈ right contrast
+ambiguous_trials <- do.call(rbind, lapply(session, function(x) {
+  data.frame(
+    mouse_name = x$mouse_name,
+    contrast_left = x$contrast_left,
+    contrast_right = x$contrast_right,
+    feedback_type = x$feedback_type  # 1 = left choice, -1 = right choice
+  ) %>%
+    filter(contrast_left == contrast_right)  # Select only ambiguous contrast trials
+}))
+
+# Count left vs. right choices for each mouse and contrast condition
+bias_counts <- ambiguous_trials %>%
+  group_by(mouse_name, contrast_left, contrast_right, feedback_type) %>%
+  summarise(choice_count = n(), .groups = "drop") %>%
+  mutate(choice_direction = ifelse(feedback_type == 1, "Left", "Right"))
+
+# Normalize counts to get proportions within each mouse and contrast condition
+bias_proportions <- bias_counts %>%
+  group_by(mouse_name, contrast_left, contrast_right) %>%
+  mutate(proportion = choice_count / sum(choice_count)) %>%
+  ungroup()
+
+# Print the decision bias distribution for each mouse
+print(bias_proportions)
+
+# Visualization: Stacked bar plot showing left/right choices per contrast condition
+ggplot(bias_proportions, aes(x = factor(contrast_left), y = proportion, fill = choice_direction)) +
+  geom_bar(stat = "identity", position = "stack") +
+  facet_wrap(~mouse_name) +
+  labs(title = "Decision Bias in Ambiguous Contrast Trials by Mouse",
+       x = "Contrast Level (Left = Right)",
+       y = "Proportion of Choices",
+       fill = "Choice Direction") +
+  scale_fill_manual(values = c("Left" = "blue", "Right" = "red")) +
+  theme_minimal()
+
+```
+
+### 1. Mouse-Specific Biases:
+
+```         
+1.Cori shows a relatively balanced response, but at some contrast levels, it slightly favors left choices.
+
+2.Forssmann exhibits a clear right-side preference at lower contrast levels but becomes more balanced as contrast increases.
+
+3.Hench follows a similar pattern to Forssmann, showing a strong right bias at lower contrast.
+Lederberg has the most noticeable right bias, especially at contrast levels of 0.25 and 0.5.
+```
+
+## 4.5 Based on 4.4, Explore whether the bias of each mouse will have a clear tendency as the session increases
+
+```{r, echo=FALSE}
+
+# Load necessary libraries
+library(dplyr)
+library(ggplot2)
+
+# Compute bias for each session
+bias_trend_data <- data.frame()
+
+for (i in 1:length(session)) {
+  session_data <- session[[i]]
+  session_id <- i
+  mouse_name <- unique(session_data$mouse_name)
+  
+  # Compute choice proportions for the session
+  left_choice_rate <- mean(session_data$feedback_type == 1, na.rm = TRUE)
+  right_choice_rate <- mean(session_data$feedback_type == -1, na.rm = TRUE)
+  
+  # Append data
+  bias_trend_data <- rbind(bias_trend_data, data.frame(
+    session_id = session_id,
+    mouse_name = mouse_name,
+    left_choice_rate = left_choice_rate,
+    right_choice_rate = right_choice_rate
+  ))
+}
+
+# Reshape data for visualization
+bias_trend_long <- pivot_longer(bias_trend_data, cols = c(left_choice_rate, right_choice_rate), 
+                                names_to = "Choice_Direction", values_to = "Proportion")
+
+# Plot bias trend over sessions
+ggplot(bias_trend_long, aes(x = session_id, y = Proportion, color = Choice_Direction)) +
+  geom_line(size = 1) +
+  geom_point(size = 2) +
+  facet_wrap(~mouse_name) +
+  labs(title = "Decision Bias Trend Over Sessions",
+       x = "Session Number",
+       y = "Proportion of Choices",
+       color = "Choice Direction") +
+  scale_color_manual(values = c("left_choice_rate" = "blue", "right_choice_rate" = "red"),
+                     labels = c("Left Choice", "Right Choice")) +
+  theme_minimal()
+```
+
+### 1. Findings from the Decision Bias Trend Over Sessions
+
+```         
+In Hench and Lederberg, the proportion of left choices steadily increases over sessions, while right choices decrease. This suggests a stronger preference for left choices as they gain more experience.
+```
+
+### 2. Stable Bias in Some Mice:
+
+```         
+1.Forssmann's bias remains relatively stable, indicating that their decision-making is consistent across sessions.
+
+2.Cori shows a slight increase in left choices, but it's not as strong as Hench or Lederberg.
+```
+
+### 3. Fluctuating Bias in Some Cases:
+
+```         
+In Hench, there is some fluctuation in left choice preference, but the overall trend is increasing.This could indicate that decision-making is adaptive and may depend on specific conditions in each session.
+```
+
+## 4.6 Explore Distribution of Absolute Contrast Difference Across All Sessions
+
+```{r, echo=FALSE}
+# Load necessary libraries
+library(dplyr)
+library(ggplot2)
+
+# Compute absolute contrast difference across all sessions
+all_abs_contrast_diff <- do.call(rbind, lapply(session, function(x) {
+  data.frame(
+    mouse_name = x$mouse_name,
+    abs_contrast_diff = abs(x$contrast_left - x$contrast_right)
+  )
+}))
+
+# Print first few rows to verify
+head(all_abs_contrast_diff)
+
+# Plot histogram of absolute contrast differences
+ggplot(all_abs_contrast_diff, aes(x = abs_contrast_diff, fill = mouse_name)) +
+  geom_histogram(binwidth = 0.1, alpha = 0.7, position = "dodge") +
+  labs(title = "Distribution of Absolute Contrast Difference Across All Sessions",
+       x = "Absolute Contrast Difference",
+       y = "Count") +
+  theme_minimal()
+```
+
+### 1. High Frequency of Trials with Zero Contrast Difference
+
+```         
+The leftmost bar (0.00 contrast difference) is the highest across all mice, particularly for Lederberg (purple) and Hench (blue). This indicates that many trials had equal contrast on both sides, meaning the mice had to make decisions without a strong visual cue. This could be part of a control condition where decision-making is tested in ambiguous conditions.
+```
+
+### 2. Uneven Distribution of Contrast Differences
+
+```         
+Higher contrast differences (0.75 and 1.00) occur less frequently than lower contrast differences. This suggests that most trials were designed to test difficult decision-making cases (low contrast differences) rather than easy ones (high contrast differences).
+The distribution is not uniform, meaning different contrast levels were used at different frequencies.
+```
+
+### 3. Mouse-Specific Differences in Trial Distribution
+
+```         
+1.Lederberg (purple) participated in the most trials across all contrast differences, indicating this mouse had the highest trial count.
+
+2.Forssmann (green) and Hench (blue) have relatively similar distributions, with more trials in low contrast differences than high ones.
+
+3.Cori (red) participated in fewer trials overall, which may indicate differences in performance, experimental conditions, or task engagement.
+```
+
+### 4. Potential Bias in Trial Design
+
+```         
+The noticeable drop at 0.25 contrast difference, followed by an increase at 0.50 and 0.75, suggests a non-uniform trial design.
+```
+
+## 4.7 Explore Mouse Decision Bias Across Absolute Contrast Differences,To Find Any Rules Between Chioce Decision And Absolute Contrast Differences
+
+```{r, echo=FALSE}
+# Load necessary libraries
+library(dplyr)
+library(ggplot2)
+
+# Combine all session data
+all_data <- do.call(rbind, lapply(session, function(x) {
+  data.frame(
+    mouse_name = x$mouse_name,
+    abs_contrast_diff = abs(x$contrast_left - x$contrast_right),
+    feedback_type = x$feedback_type  # 1 = left choice, -1 = right choice
+  )
+}))
+
+# Compute the proportion of left vs. right choices for each absolute contrast difference
+decision_data <- all_data %>%
+  group_by(mouse_name, abs_contrast_diff) %>%
+  summarise(
+    left_choices = sum(feedback_type == 1),
+    right_choices = sum(feedback_type == -1),
+    total_trials = n(),
+    left_choice_rate = left_choices / total_trials,
+    right_choice_rate = right_choices / total_trials,
+    .groups = "drop"
+  )
+
+# Plot decision distribution across absolute contrast differences
+ggplot(decision_data, aes(x = abs_contrast_diff)) +
+  geom_line(aes(y = left_choice_rate, color = "Left Choice"), size = 1) +
+  geom_line(aes(y = right_choice_rate, color = "Right Choice"), size = 1) +
+  facet_wrap(~mouse_name) +
+  scale_color_manual(values = c("blue", "red")) +
+  labs(
+    title = "Mouse Decision Bias Across Absolute Contrast Differences",
+    x = "Absolute Contrast Difference |Left - Right|",
+    y = "Proportion of Choices",
+    color = "Choice Direction"
+  ) +
+  theme_minimal()
+```
+
+### 1. Bias at abs(contrast_left - contrast_right) = 0
+
+```         
+Some mice do not choose 50-50 when the contrast is equal.
+If a mouse prefers left more often at abs_contrast_diff = 0, it suggests a natural left-side bias independent of contrast.
+Forssmann and Hench show a stronger left-choice tendency in ambiguous cases.
+Increasing Absolute Contrast Difference
+```
+
+### 2. As abs_contrast_diff increases:
+
+```         
+Left choices increase (for most mice).
+Right choices decrease, indicating that mice rely more on contrast to make decisions.
+The trend isn't perfectly linear, suggesting that individual biases interact with contrast strength.
+```
+
+### 3. Mouse-Specific Trends
+
+```         
+Lederberg has a strong left bias at medium contrast differences but flattens out at high values.
+Hench appears more random at mid-range contrast differences, meaning decisions may not be fully driven by contrast.
+Forssmann's left-choice rate stabilizes over higher contrast differences, indicating clearer decision-making with stronger stimuli.
+```
+
+## All The Contrast Level Were Done And For Futher Investigation, Neural Activity Is Also An Important Part For Influence The Mouse Decision
+
+## 4.8 Neural Activities - Average Spike Rate per Neuron
+
+```{r, echo=FALSE}
+# Load necessary libraries
+library(ggplot2)
+library(dplyr)
+
+# Compute average spike rate per neuron in each session
+avg_spike_rates <- lapply(session, function(x) {
+  if (is.null(x$spks) || length(x$spks) == 0) return(NA)  # Handle missing spike data
+  firing_rates <- sapply(x$spks, function(trial) rowMeans(trial, na.rm = TRUE))  # Compute firing rates per neuron
+  return(rowMeans(firing_rates, na.rm = TRUE))  # Average across all neurons
+})
+
+# Convert to a data frame for visualization
+spike_rate_df <- data.frame(
+  Session = rep(1:18, sapply(avg_spike_rates, length)),
+  Spike_Rate = unlist(avg_spike_rates)
+)
+
+# Plot average spike rate per neuron per session
+ggplot(spike_rate_df, aes(x = factor(Session), y = Spike_Rate)) +
+  geom_boxplot(fill = "blue", alpha = 0.6) +
+  labs(title = "Average Spike Rate per Neuron Across Sessions",
+       x = "Session",
+       y = "Mean Spike Rate") +
+  theme_minimal()
+
+
+```
+
+### 1. Low Mean Firing Rates Across Sessions:
+
+```         
+The majority of neurons exhibit relatively low spike rates, with the median values clustered close to zero.
+This suggests that most neurons fire infrequently during trials.
+```
+
+### 2. Presence of Outliers:
+
+```         
+Each session contains a subset of neurons with significantly higher firing rates (above 0.3 and in some cases exceeding 0.9).
+These high-firing neurons could represent task-relevant or stimulus-driven neurons, which respond selectively to specific trial conditions.
+```
+
+### 3. Session-to-Session Variability:
+
+Some sessions (e.g., Session 3, Session 13) appear to have slightly higher median spike rates and more variance compared to other sessions.
+This could indicate variability in neural engagement or differences in task conditions across sessions.
+
+### 4. Heterogeneity in Neural Activity:
+
+The spread of firing rates varies across sessions, indicating that some sessions have more heterogeneous neuronal responses than others.
+
+## 4.9 Changes Across Trials - Success Rate
+
+```{r, echo=FALSE}
+# Compute success rates for each session
+success_rates <- sapply(session, function(x) mean(x$feedback_type == 1, na.rm = TRUE))
+
+# Create a data frame for visualization
+success_rate_df <- data.frame(Session = 1:18, Success_Rate = success_rates)
+
+# Plot success rate per session
+ggplot(success_rate_df, aes(x = Session, y = Success_Rate)) +
+  geom_line(color = "red", size = 1) +
+  geom_point(color = "black", size = 2) +
+  labs(title = "Success Rate Across Trials",
+       x = "Session",
+       y = "Success Rate") +
+  theme_minimal()
+
+```
+
+### 1. Overall Increasing Trend:
+
+```         
+The success rate generally improves across sessions, indicating that the mice may be learning or adapting to the task over time.
+The increase becomes more pronounced after Session 10, where the success rate consistently rises above 0.75.
+```
+
+### 2. Fluctuations in Performance:
+
+```         
+Although there is a general upward trend, success rates show noticeable fluctuations, with some sessions experiencing sharp drops.
+For example, around Session 10, there is a sharp dip, suggesting possible difficulty in that session’s task conditions or a temporary performance decline.
+```
+
+### 3. Plateauing Effect Toward the End:
+
+```         
+After Session 15, the success rate stabilizes at around 0.80, suggesting that the mice may have reached a learning plateau where further improvement is minimal.
+This could indicate that they have optimized their strategy and additional sessions do not significantly enhance their performance.
+```
+
+### 4. Potential Experiment Effects:
+
+```         
+The sharp increase after Session 10 suggests that something may have changed in the experiment—possibly new training, reinforcement, or an adjustment in trial difficulty.
+Checking for external changes in task structure or reward mechanisms could help explain these shifts.
+```
+
+## 4.10 Homogeneity & Heterogeneity Across Sessions & Mice
+
+```{r, echo=FALSE}
+# Extract mouse names for each session
+mouse_summary <- data.frame(
+  Mouse = sapply(session, function(x) x$mouse_name[1]),
+  Session = 1:18,
+  Neurons = sapply(session, function(x) length(x$brain_area)),
+  Trials = sapply(session, function(x) length(x$feedback_type)),
+  Brain_Areas = sapply(session, function(x) length(unique(x$brain_area)))
+)
+
+# Print summary statistics
+print(mouse_summary)
+
+# Plot neuron count across sessions per mouse
+ggplot(mouse_summary, aes(x = factor(Session), y = Neurons, fill = Mouse)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(title = "Neuron Count Across Sessions",
+       x = "Session",
+       y = "Neuron Count") +
+  theme_minimal()
+
+# Plot trial count across sessions per mouse
+ggplot(mouse_summary, aes(x = factor(Session), y = Trials, fill = Mouse)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(title = "Trial Count Across Sessions",
+       x = "Session",
+       y = "Number of Trials") +
+  theme_minimal()
+
+```
+
+### 1.From the plot we can see that there is a decline in the number of active neurons per session,it is maybe related to fatigue or adaptation in the mice.
+
+```         
+As the experiment progresses, the mouse may become physically or mentally tired.Fatigue could lead to reduced engagement with the task, which might affect neural activity or spike detection.If neurons involved in decision-making and motor control are less active due to fatigue, this could reduce the overall number of recorded spikes.The mouse could be adapting to the task, leading to more efficient neural processing.Over time, the brain may optimize its neural strategy, reducing the need for widespread activation.This would result in fewer neurons actively participating in the task but still maintaining similar performance.
+```
+
+## 4.11 Compare High vs. Low Firing Rate Neurons Across Brain Areas ###This identifies whether neurons with higher firing rates are concentrated in certain brain areas or randomly distributed.
+
+```{r, echo=FALSE}
+
+library(dplyr)
+library(ggplot2)
+
+# Create a dataframe to store results
+neuron_firing_data <- data.frame()
+
+for (i in 1:18) {
+  session_data <- session[[i]]
+  
+  if (!is.null(session_data$spks) && length(session_data$spks) > 0) {
+    firing_rates <- rowMeans(do.call(rbind, session_data$spks), na.rm = TRUE)  # Compute avg firing rate per neuron
+    brain_areas <- session_data$brain_area
+    
+    session_df <- data.frame(
+      session_id = i,
+      brain_area = brain_areas,
+      firing_rate = firing_rates
+    )
+    
+    neuron_firing_data <- rbind(neuron_firing_data, session_df)
+  }
+}
+
+# Categorize neurons into high and low firing rate groups
+median_firing <- median(neuron_firing_data$firing_rate, na.rm = TRUE)
+neuron_firing_data$rate_category <- ifelse(neuron_firing_data$firing_rate >= median_firing, "High", "Low")
+
+# Plot distribution of high vs. low firing rate neurons across brain areas
+ggplot(neuron_firing_data, aes(x = brain_area, fill = rate_category)) +
+  geom_bar(position = "dodge") +
+  labs(title = "Distribution of High vs. Low Firing Rate Neurons Across Brain Areas",
+       x = "Brain Area", y = "Neuron Count") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+### 1. Uneven Distribution of High-Firing Neurons
+
+```         
+Certain brain areas have a significantly higher concentration of high-firing rate neurons compared to others.
+One particular brain area shows an exceptionally high spike rate, suggesting it may play a key role in task-related neural activity.
+```
+
+## 4.12 Compare Firing Rates in Success vs. Failure Trials
+
+```{r, echo=FALSE}
+# Function to extract spike rates for valid trials
+extract_spike_data <- function(session) {
+  if (!("spks" %in% names(session)) || length(session$spks) == 0) return(NULL)
+  
+  valid_trials <- which(sapply(session$spks, function(spk) !is.null(spk) && length(spk) > 0))
+  if (length(valid_trials) == 0) return(NULL)
+  
+  data.frame(
+    mouse_name = rep(session$mouse_name[1], length(valid_trials)), 
+    feedback_type = session$feedback_type[valid_trials],  # 1 = Success, -1 = Failure
+    mean_spike_rate = sapply(session$spks[valid_trials], function(spks) {
+      if (!is.null(spks) && length(spks) > 0) {
+        return(mean(rowMeans(spks, na.rm = TRUE), na.rm = TRUE))
+      } else {
+        return(NA)
+      }
+    })
+  ) %>% filter(!is.na(mean_spike_rate))
+}
+
+# Apply function to all sessions
+spike_data_list <- lapply(session, extract_spike_data)
+spike_data <- do.call(rbind, spike_data_list)
+
+# **Boxplot: Compare firing rates in success vs. failure trials**
+ggplot(spike_data, aes(x = factor(feedback_type), y = mean_spike_rate, fill = factor(feedback_type))) +
+  geom_boxplot() +
+  facet_wrap(~mouse_name) +
+  labs(title = "Neuronal Activity: Success vs. Failure Trials",
+       x = "Feedback Type (1 = Success, -1 = Failure)", y = "Mean Spike Rate") +
+  scale_fill_manual(values = c("blue", "red"), name = "Feedback Type") +
+  theme_minimal()
+
+# **T-test to check significance**
+spike_test_results <- spike_data %>%
+  group_by(mouse_name) %>%
+  summarise(t_test_p = t.test(mean_spike_rate[feedback_type == 1], 
+                              mean_spike_rate[feedback_type == -1])$p.value)
+
+# Print statistical results
+print(spike_test_results)
+```
+
+### 1. Session 8 and Session 13 recorded the highest number of brain areas (15).
+
+```         
+This means that during these sessions, neural activity was recorded from many different regions of the brain.
+These sessions likely involved a more complex experiment, requiring broader neural monitoring.
+```
+
+### 2. Sessions 2, 6, and 16 recorded the lowest number of brain areas (5–6).
+
+```         
+These sessions may have been focused on specific brain regions, rather than collecting data from multiple areas.
+```
+
+### 3. Overall trend:
+
+```         
+The number of recorded brain areas fluctuates throughout the sessions.
+There is no clear increasing or decreasing trend.
+```
+
+## 4.13 Correlate Firing Rates with Absolute Contrast Difference
+
+```{r, echo=FALSE}
+library(dplyr)
+library(ggplot2)
+
+# Compute absolute contrast difference and mouse choices
+decision_bias <- do.call(rbind, lapply(session, function(x) {
+  if (!("contrast_left" %in% names(x)) || !("contrast_right" %in% names(x)) || !("feedback_type" %in% names(x))) return(NULL)
+  
+  data.frame(
+    mouse_name = rep(x$mouse_name[1], length(x$contrast_left)),
+    abs_contrast_diff = abs(x$contrast_left - x$contrast_right),
+    feedback_type = x$feedback_type  # 1 = Left choice, -1 = Right choice
+  )
+}))
+
+# Check if decision_bias is correctly created
+print(head(decision_bias))
+# Compute choice proportions per absolute contrast difference
+bias_summary <- decision_bias %>%
+  group_by(mouse_name, abs_contrast_diff) %>%
+  summarise(
+    left_choice_rate = mean(feedback_type == 1, na.rm = TRUE),
+    right_choice_rate = mean(feedback_type == -1, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# Plot decision bias trend
+ggplot(bias_summary, aes(x = abs_contrast_diff)) +
+  geom_line(aes(y = left_choice_rate, color = "Left Choice"), size = 1) +
+  geom_line(aes(y = right_choice_rate, color = "Right Choice"), size = 1) +
+  facet_wrap(~mouse_name) +
+  labs(title = "Mouse Decision Bias Across Absolute Contrast Differences",
+       x = "Absolute Contrast Difference |Left - Right|",
+       y = "Proportion of Choices") +
+  scale_color_manual(values = c("blue", "red"), name = "Choice Direction") +
+  theme_minimal()
+# Merge firing rates with absolute contrast difference
+spike_contrast_data <- decision_bias %>%
+  left_join(spike_data, by = c("mouse_name", "feedback_type"))
+
+# Scatter plot: Mean spike rate vs. contrast difference
+ggplot(spike_contrast_data, aes(x = abs_contrast_diff, y = mean_spike_rate)) +
+  geom_point(alpha = 0.5) +
+  geom_smooth(method = "lm", color = "red") +
+  facet_wrap(~mouse_name) +
+  labs(title = "Correlation Between Firing Rate and Contrast Difference",
+       x = "Absolute Contrast Difference |Left - Right|",
+       y = "Mean Firing Rate") +
+  theme_minimal()
+
+# Compute Pearson correlation
+cor_results <- spike_contrast_data %>%
+  group_by(mouse_name) %>%
+  summarise(correlation = cor(abs_contrast_diff, mean_spike_rate, use = "complete.obs"))
+
+print(cor_results)
+```
+
+The firing rates appear to be clustered around similar values regardless of contrast difference.
+
+There is no strong trend that firing rates increase or decrease as contrast difference changes.
+
+## 4.14 Early vs. Late Firing Rate and Success
+
+```{r, echo=FALSE}
+
+library(dplyr)
+library(ggplot2)
+
+# Initialize data storage
+firing_success_df <- data.frame()
+
+# Iterate through sessions
+for (i in 1:length(session)) {
+  session_data <- session[[i]]
+  
+  # Check if spiking data exists
+  if (is.null(session_data$spks) || length(session_data$spks) == 0) next
+  
+  # Compute early and late firing rates
+  early_firing <- sapply(session_data$spks, function(spk) mean(spk[ , 1:floor(ncol(spk)/2)], na.rm = TRUE))
+  late_firing <- sapply(session_data$spks, function(spk) mean(spk[ , (floor(ncol(spk)/2) + 1):ncol(spk)], na.rm = TRUE))
+  
+  # Create trial-level dataframe
+  session_df <- data.frame(
+    mouse_name = session_data$mouse_name,
+    session_id = i,
+    feedback_type = session_data$feedback_type,  # 1 = success, -1 = failure
+    early_firing_rate = early_firing,
+    late_firing_rate = late_firing
+  )
+  
+  # Append to master dataset
+  firing_success_df <- rbind(firing_success_df, session_df)
+}
+
+# Compute success rates
+firing_success_df <- firing_success_df %>%
+  mutate(success = ifelse(feedback_type == 1, 1, 0))
+
+# Compute correlation between firing rates and success rate
+cor_early <- cor.test(firing_success_df$early_firing_rate, firing_success_df$success, use = "complete.obs")
+cor_late <- cor.test(firing_success_df$late_firing_rate, firing_success_df$success, use = "complete.obs")
+
+# Print correlations
+cat("Correlation between early firing rate and success:", cor_early$estimate, "\n")
+cat("Correlation between late firing rate and success:", cor_late$estimate, "\n")
+
+# Logistic regression model
+model <- glm(success ~ early_firing_rate + late_firing_rate, data = firing_success_df, family = "binomial")
+summary(model)
+
+# Visualization: Success rate vs. firing rate
+ggplot(firing_success_df, aes(x = early_firing_rate, y = success)) +
+  geom_smooth(method = "glm", method.args = list(family = "binomial"), color = "blue") +
+  ggtitle("Early Firing Rate vs. Success Rate") +
+  xlab("Early Firing Rate") + ylab("Success Probability") +
+  theme_minimal()
+
+ggplot(firing_success_df, aes(x = late_firing_rate, y = success)) +
+  geom_smooth(method = "glm", method.args = list(family = "binomial"), color = "red") +
+  ggtitle("Late Firing Rate vs. Success Rate") +
+  xlab("Late Firing Rate") + ylab("Success Probability") +
+  theme_minimal()
+```
+
+### 1. Early Firing Rate and Success Probability:
+
+```         
+Higher early firing rates correlate with increased success probability.
+```
+
+This suggests that early neural activity could play a role in encoding or predicting successful decisions.
+
+### 2. Late Firing Rate and Success Probability:
+
+A stronger positive correlation than early firing rate.
+This may indicate that late-stage neural activity reflects commitment to a decision or confidence in the choice.
+
+## 4.15 Influence of early and late firing rates on success probability for each mouse
+
+```{r, echo=FALSE}
+library(dplyr)
+library(ggplot2)
+
+# Create an empty dataframe to store firing rate and success rate by mouse
+firing_success_data <- data.frame()
+
+for (i in 1:length(session)) {
+  session_data <- session[[i]]
+  
+  # Skip if spiking data is missing
+  if (is.null(session_data$spks) || length(session_data$spks) == 0) next
+  
+  # Compute early and late firing rates (mean spikes over first half and second half of time bins)
+  early_firing <- rowMeans(do.call(rbind, lapply(session_data$spks, function(trial) mean(trial[, 1:(ncol(trial)/2)], na.rm=TRUE))))
+  late_firing <- rowMeans(do.call(rbind, lapply(session_data$spks, function(trial) mean(trial[, (ncol(trial)/2 + 1):ncol(trial)], na.rm=TRUE))))
+  
+  # Store results with success information
+  session_firing <- data.frame(
+    mouse_name = session_data$mouse_name[1],
+    success = as.numeric(session_data$feedback_type == 1),
+    early_firing = early_firing,
+    late_firing = late_firing
+  )
+  
+  firing_success_data <- rbind(firing_success_data, session_firing)
+}
+
+# Compute mean success rate for different firing rates by mouse
+early_firing_summary <- firing_success_data %>%
+  group_by(mouse_name, early_firing) %>%
+  summarise(success_rate = mean(success), .groups = "drop")
+
+late_firing_summary <- firing_success_data %>%
+  group_by(mouse_name, late_firing) %>%
+  summarise(success_rate = mean(success), .groups = "drop")
+
+# Plot early firing rate vs. success rate for each mouse
+ggplot(early_firing_summary, aes(x = early_firing, y = success_rate)) +
+  geom_smooth(method = "loess", color = "blue", fill = "gray") +
+  facet_wrap(~mouse_name) +
+  labs(title = "Early Firing Rate vs. Success Rate (by Mouse)",
+       x = "Early Firing Rate",
+       y = "Success Probability") +
+  theme_minimal()
+
+# Plot late firing rate vs. success rate for each mouse
+ggplot(late_firing_summary, aes(x = late_firing, y = success_rate)) +
+  geom_smooth(method = "loess", color = "red", fill = "gray") +
+  facet_wrap(~mouse_name) +
+  labs(title = "Late Firing Rate vs. Success Rate (by Mouse)",
+       x = "Late Firing Rate",
+       y = "Success Probability") +
+  theme_minimal()
+```
+
+### 1. Early Firing Rate vs. Success Rate:
+
+```         
+For most mice, an increase in early firing rate correlates with a higher success rate.
+Some mice show a plateau effect, where success probability remains stable after reaching a certain firing rate.
+Cori and Hench exhibit a sharp increase at high early firing rates, suggesting an early predictive role in decision-making.
+```
+
+### 2. Late Firing Rate vs. Success Rate:
+
+```         
+The correlation between late firing rate and success probability is more pronounced.
+The relationship appears more linear, meaning higher late firing rates consistently lead to better success.
+Cori and Hench again show a strong positive relationship, while Forssmann and Lederberg exhibit a more moderate effect.
+```
+
+## 4.16 Analyze Session-Wise Correlations: Firing Rate vs. Success Rate, Check if sessions with more high-firing neurons correspond to higher success rates.
+
+```{r, echo=FALSE}
+# Compute session-wise average firing rate
+session_avg_firing <- neuron_firing_data %>%
+  group_by(session_id) %>%
+  summarise(avg_firing_rate = mean(firing_rate, na.rm = TRUE))
+
+# Compute session-wise success rate
+session_success_rate <- data.frame(
+  session_id = 1:18,
+  success_rate = sapply(session, function(x) mean(x$feedback_type == 1, na.rm = TRUE))
+)
+
+# Merge both datasets
+correlation_data <- merge(session_avg_firing, session_success_rate, by = "session_id")
+
+# Plot firing rate vs. success rate
+ggplot(correlation_data, aes(x = avg_firing_rate, y = success_rate)) +
+  geom_point(color = "blue") +
+  geom_smooth(method = "lm", color = "red") +
+  labs(title = "Session-Wise Correlation: Firing Rate vs. Success Rate",
+       x = "Average Firing Rate", y = "Success Rate")
+
+# Compute Pearson correlation
+cor(correlation_data$avg_firing_rate, correlation_data$success_rate, use = "complete.obs")
+
+
+```
+
+### No Clear Correlation Between Firing Rate and Success Rate
+
+1.The red regression line is nearly flat, indicating that changes in the average firing rate do not significantly affect success rate across sessions.
+
+2.The confidence interval (gray shading) is quite wide, especially at the extremes, suggesting high variability in the relationship.
+
+### Large Variability in Success Rates
+
+1.Some sessions with similar firing rates have very different success rates.
+
+2.A few sessions with relatively high firing rates correspond to both high and low success rates.
+
+## 4.17 Investigating Brain Region Relationship with High Contrast Trials, We will analyze if neurons from specific brain areas have higher firing rates in sessions with more high contrast trials.
+
+```{r, echo=FALSE}
+library(ggplot2)
+library(dplyr)
+
+# Create a dataframe to store results
+brain_region_analysis <- data.frame()
+
+for (i in 1:18) {
+  session_data <- session[[i]]
+  
+  # Extract neuron-specific spike data
+  if (is.null(session_data$spks) || length(session_data$spks) == 0) next  # Skip empty cases
+  
+  neuron_ids <- unique(session_data$brain_area)  # List of neurons' brain areas
+  
+  # Compute mean firing rate per neuron
+  neuron_firing_rates <- sapply(neuron_ids, function(region) {
+    neuron_idx <- which(session_data$brain_area == region)  # Find neurons in this region
+    if (length(neuron_idx) == 0) return(NA)  # Handle empty neurons
+    
+    neuron_spikes <- lapply(session_data$spks, function(trial) trial[neuron_idx])  # Extract neuron-specific spikes
+    neuron_mean_firing <- mean(unlist(neuron_spikes), na.rm=TRUE)  # Compute average firing
+    return(neuron_mean_firing)
+  })
+  
+  high_contrast_proportion <- mean(session_data$contrast_left >= 0.5 | session_data$contrast_right >= 0.5)
+
+  # Ensure lengths match before merging
+  if (length(neuron_ids) != length(neuron_firing_rates)) next
+  
+  region_summary <- data.frame(
+    session_id = rep(i, length(neuron_ids)),
+    brain_area = neuron_ids,
+    mean_firing_rate = neuron_firing_rates,
+    high_contrast_proportion = rep(high_contrast_proportion, length(neuron_ids))
+  )
+
+  brain_region_analysis <- rbind(brain_region_analysis, region_summary)
+}
+
+# Remove NA values
+brain_region_analysis <- na.omit(brain_region_analysis)
+
+# Aggregate firing rate by brain region
+brain_region_summary <- brain_region_analysis %>%
+  group_by(brain_area) %>%
+  summarise(mean_firing_rate = mean(mean_firing_rate, na.rm = TRUE),
+            avg_high_contrast = mean(high_contrast_proportion, na.rm = TRUE))
+
+# Scatter plot of firing rate vs. high contrast trial proportion by brain area
+ggplot(brain_region_summary, aes(x = avg_high_contrast, y = mean_firing_rate, label = brain_area)) +
+  geom_point(color = "blue") +
+  geom_text(size = 3, vjust = -1) +
+  labs(title = "Brain Region Firing Rate vs. High Contrast Trial Proportion",
+       x = "Proportion of High Contrast Trials",
+       y = "Mean Firing Rate") +
+  theme_minimal()
+
+
+```
+
+### 1. Certain Brain Regions Show Higher Firing Rates:
+
+```         
+A few brain regions, such as RN (Red Nucleus), MS (Medial Septum), LH (Lateral Hypothalamus), and SPF (Subparafascicular Area), exhibit significantly higher mean firing rates.
+```
+
+This suggests that these regions might be more involved in processing high contrast stimuli or decision-making in response to visual inputs.
+Most Brain Regions Cluster Around Lower Firing Rates: A majority of brain regions are clustered around a low mean firing rate (\~0.02 to 0.05).
+This indicates that for most regions, firing activity does not significantly increase even when the proportion of high contrast trials is higher.
+
+### 1. Lack of Strong Linear Relationship:
+
+There does not appear to be a strong correlation between high contrast trial proportion and firing rate across brain regions.
+While some regions with higher contrast exposure do show increased firing rates, others remain relatively stable.
+
+### 2. Variability Across Brain Areas:
+
+Some areas with a similar proportion of high contrast trials have widely different firing rates.
+This suggests region-specific specialization, meaning some areas are more responsive to contrast variations than others.
+
+## 4.18 Statistical Correlation Analysis: Check whether the correlation coefficient between contrast proportion and firing rate is statistically significant.
+
+```{r, echo=FALSE}
+# Ensure the data exists
+if (exists("brain_region_data") && nrow(brain_region_data) > 0) {
+  
+  # Remove missing values before correlation test
+  brain_region_data_clean <- na.omit(brain_region_data)
+  
+  # Compute Pearson correlation coefficient
+  cor_test <- cor.test(
+    brain_region_data_clean$proportion_high_contrast,
+    brain_region_data_clean$mean_firing_rate,
+    method = "pearson"
+  )
+  
+  # Print the correlation result
+  print(cor_test)
+  
+  # Visualization: Scatter plot with regression line
+  library(ggplot2)
+  
+  ggplot(brain_region_data_clean, aes(x = proportion_high_contrast, y = mean_firing_rate)) +
+    geom_point(color = "blue") +
+    geom_smooth(method = "lm", color = "red", fill = "gray") +
+    labs(title = "Brain Region Firing Rate vs. High Contrast Trial Proportion",
+         x = "Proportion of High Contrast Trials",
+         y = "Mean Firing Rate") +
+    theme_minimal()
+  
+} else {
+  print("Error: brain_region_data does not exist or is empty!")
+}
+
+
+```
+
+Correlation Coefficient (r) = -0.00094.
+This value is extremely close to 0, indicating almost no correlation between the two variables.
+
+## 4.19 To investigate whether fatigue or adaptation is driving the decrease in neuron activity:Compare Early vs. Late Trials Within Each Session
+
+### 1. If fatigue is present, we expect a gradual decline in neural firing rates in later trials.
+
+### 2. If adaptation is occurring, we might observe consistent firing rates but with changes in which neurons are active.
+
+```{r, echo=FALSE}
+library(dplyr)
+library(ggplot2)
+
+# Define early and late trials (first 20% vs. last 20%)
+early_late_comparison <- data.frame()
+
+for (i in 1:18) {
+  session_data <- session[[i]]
+  
+  num_trials <- length(session_data$feedback_type)
+  early_idx <- 1:round(num_trials * 0.2)
+  late_idx <- (num_trials - round(num_trials * 0.2)):num_trials
+  
+  early_firing <- rowMeans(do.call(rbind, session_data$spks[early_idx]), na.rm = TRUE)
+  late_firing <- rowMeans(do.call(rbind, session_data$spks[late_idx]), na.rm = TRUE)
+  
+  session_summary <- data.frame(
+    session_id = i,
+    early_firing_rate = mean(early_firing, na.rm = TRUE),
+    late_firing_rate = mean(late_firing, na.rm = TRUE)
+  )
+  
+  early_late_comparison <- rbind(early_late_comparison, session_summary)
+}
+
+# Plot comparison
+ggplot(early_late_comparison, aes(x = factor(session_id))) +
+  geom_bar(aes(y = early_firing_rate, fill = "Early Trials"), stat = "identity", position = "dodge") +
+  geom_bar(aes(y = late_firing_rate, fill = "Late Trials"), stat = "identity", position = "dodge") +
+  labs(title = "Firing Rate in Early vs. Late Trials",
+       x = "Session ID",
+       y = "Mean Firing Rate") +
+  scale_fill_manual(values = c("Early Trials" = "blue", "Late Trials" = "red"),
+                    name = "Trial Period") +
+  theme_minimal()
+
+
+```
+
+### 1. Late Trials Have Higher Firing Rates in Most Sessions:
+
+```         
+The red bars (late trials) are consistently taller than the blue bars (early trials) in most sessions.This suggests that neuronal activity does not decline over time, which weakens the fatigue hypothesis.
+```
+
+# 5 Data integration
+
+## 5.1 Integrates multiple session datasets into a single combined dataset
+
+```{r, echo=FALSE}
+library(dplyr)
+library(tidyr)
+
+# Initialize a combined dataframe for all trials across sessions
+combined_data <- data.frame()
+
+# Iterate over all sessions
+for (i in 1:length(session)) {
+  session_data <- session[[i]]
+  
+  # Ensure session data contains required fields
+  if (!("contrast_left" %in% names(session_data)) || 
+      !("contrast_right" %in% names(session_data)) || 
+      !("feedback_type" %in% names(session_data)) || 
+      !("spks" %in% names(session_data))) next
+  
+  # Compute absolute contrast difference
+  abs_contrast_diff <- abs(session_data$contrast_left - session_data$contrast_right)
+  
+  # Compute early and late firing rates
+  early_firing <- sapply(session_data$spks, function(spk) mean(spk[, 1:(ncol(spk)/2)], na.rm = TRUE))
+  late_firing <- sapply(session_data$spks, function(spk) mean(spk[, (ncol(spk)/2 + 1):ncol(spk)], na.rm = TRUE))
+  
+  # Compute decision bias per session
+  left_choice_rate <- mean(session_data$feedback_type == 1, na.rm = TRUE)
+  right_choice_rate <- mean(session_data$feedback_type == -1, na.rm = TRUE)
+  decision_bias <- left_choice_rate - right_choice_rate
+  
+  # Store session-level information
+  session_summary <- data.frame(
+    mouse_name = session_data$mouse_name,
+    session_id = i,
+    contrast_left = session_data$contrast_left,
+    contrast_right = session_data$contrast_right,
+    abs_contrast_diff = abs_contrast_diff,
+    success = as.numeric(session_data$feedback_type == 1),
+    early_firing_rate = early_firing,
+    late_firing_rate = late_firing,
+    decision_bias = decision_bias,
+    left_choice_rate = left_choice_rate,
+    right_choice_rate = right_choice_rate
+  )
+  
+  # Append to master dataset
+  combined_data <- rbind(combined_data, session_summary)
+}
+
+
+```
+
+1.Integrates all session data into one structured dataset.
+
+2.Computes important behavioral and neural metrics (contrast difference, firing rates, decision bias).
+
+3.Enables cross-session comparisons by normalizing the data.
+
+4.Prepares the data for further machine learning modeling.
+
+## 5.2 Processes and normalizes the combined dataset
+
+```{r, echo=FALSE}
+# Normalize firing rates by session
+combined_data <- combined_data %>%
+  group_by(session_id) %>%
+  mutate(
+    norm_early_firing = scale(early_firing_rate),
+    norm_late_firing = scale(late_firing_rate)
+  ) %>%
+  ungroup()
+
+# Compute cumulative success rate per mouse
+combined_data <- combined_data %>%
+  group_by(mouse_name, session_id) %>%
+  mutate(
+    cumulative_success = cumsum(success) / row_number()
+  ) %>%
+  ungroup()
+
+# Save the updated dataset
+write.csv(combined_data, "/Users/chenbohan/Desktop/STA141AProject/data/combined_data_normalized.csv", row.names = FALSE)
+# Compute session-level aggregates
+session_trends <- combined_data %>%
+  group_by(mouse_name, session_id) %>%
+  summarise(
+    avg_bias = mean(decision_bias, na.rm = TRUE),
+    avg_success = mean(success, na.rm = TRUE),
+    avg_abs_contrast_diff = mean(abs_contrast_diff, na.rm = TRUE),
+    avg_early_firing = mean(norm_early_firing, na.rm = TRUE),
+    avg_late_firing = mean(norm_late_firing, na.rm = TRUE)
+  )
+```
+
+1.Normalizes firing rates to make neural activity comparable across sessions.
+
+2.Tracks cumulative success to measure learning trends per mouse.
+
+3.Saves a cleaned dataset for future modeling and visualization.
+
+4\.
+Computes session-level averages for decision bias, success rate, contrast difference, and firing rates.
+
+## 5.3 Performs Principal Component Analysis (PCA) to reduce the dimensionality of the dataset and integrate session-level and mouse-level trends
+
+```{r, echo=FALSE}
+library(ggplot2)
+library(dplyr)
+
+print(names(session_trends))
+
+numeric_cols <- sapply(session_trends, is.numeric)
+session_pca_data <- session_trends[, numeric_cols]  # Select only numeric values
+
+session_pca_data <- na.omit(session_pca_data)  # Remove NAs before PCA
+session_pca_data <- scale(session_pca_data)
+
+pca_session <- prcomp(session_pca_data, center = TRUE, scale. = TRUE)
+
+ggplot(data.frame(PC = 1:length(pca_session$sdev), 
+                  Variance = (pca_session$sdev)^2 / sum((pca_session$sdev)^2)),
+       aes(x = PC, y = Variance)) +
+  geom_point() +
+  geom_line() +
+  ggtitle("Scree Plot: Session PCA") +
+  xlab("Principal Component") + ylab("Variance Explained")
+
+session_pca_reduced <- pca_session$x[, 1:3]
+
+session_pca_final <- data.frame(session_id = session_trends$session_id, session_pca_reduced)
+
+write.csv(session_pca_final, "/Users/chenbohan/Desktop/STA141AProject/data/session_pca.csv", row.names = FALSE)
+if(!"mouse_name" %in% colnames(session_trends)) {
+  stop("Error: 'mouse_name' column is missing from session_trends!")
+}
+
+numeric_cols_mouse <- sapply(session_trends, is.numeric)
+mouse_pca_data <- session_trends[, numeric_cols_mouse]
+
+mouse_pca_data <- session_trends %>%
+  group_by(mouse_name) %>%
+  summarise(across(where(is.numeric), mean, na.rm = TRUE)) %>%
+  ungroup()
+
+mouse_pca_data_numeric <- mouse_pca_data %>% select(-mouse_name)  # Drop non-numeric column
+
+mouse_pca_data_numeric <- scale(na.omit(mouse_pca_data_numeric))  # Remove NAs
+
+pca_mouse <- prcomp(mouse_pca_data_numeric, center = TRUE, scale. = TRUE)
+
+ggplot(data.frame(PC = 1:length(pca_mouse$sdev), 
+                  Variance = (pca_mouse$sdev)^2 / sum((pca_mouse$sdev)^2)),
+       aes(x = PC, y = Variance)) +
+  geom_point() +
+  geom_line() +
+  ggtitle("Scree Plot: Mouse PCA") +
+  xlab("Principal Component") + ylab("Variance Explained")
+
+mouse_pca_reduced <- pca_mouse$x[, 1:2]
+
+mouse_pca_final <- data.frame(mouse_name = mouse_pca_data$mouse_name, mouse_pca_reduced)
+
+write.csv(mouse_pca_final, "/Users/chenbohan/Desktop/STA141AProject/data/mouse_pca.csv", row.names = FALSE)
+
+```
+
+# 6 Predictive modeling
+
+## 6.1 Train-Test Split (Sessions 2-17 for Training, 1 & 18 for Testing), USe XGBoost Model
+
+```{r, echo=FALSE}
+library(xgboost)
+library(dplyr)
+library(readr)
+library(caret)
+library(ggplot2)
+
+# Set seed for reproducibility
+set.seed(123)
+# Load preprocessed dataset with features
+combined_data <- read_csv("/Users/chenbohan/Desktop/STA141AProject/data/combined_data_normalized.csv")
+
+# Load PCA results for session-level and mouse-level features
+session_pca <- read_csv("/Users/chenbohan/Desktop/STA141AProject/data/session_pca.csv")
+mouse_pca <- read_csv("/Users/chenbohan/Desktop/STA141AProject/data/mouse_pca.csv")
+
+# Merge PCA features into the main dataset
+combined_data <- combined_data %>%
+  left_join(session_pca, by = "session_id") %>%
+  left_join(mouse_pca, by = "mouse_name")
+
+# Drop any missing values
+combined_data <- na.omit(combined_data)
+
+# View data structure
+str(combined_data)
+# Define train and test sets
+train_data <- combined_data %>% filter(session_id >= 2 & session_id <= 17)
+test_data <- combined_data %>% filter(session_id %in% c(1, 18))
+
+# Extract features and target variable
+train_x <- train_data %>% select(-session_id, -mouse_name, -success) %>% as.matrix()
+train_y <- train_data$success  # Success as the target variable
+
+test_x <- test_data %>% select(-session_id, -mouse_name, -success) %>% as.matrix()
+test_y <- test_data$success  # Success for testing
+
+# Convert to XGBoost DMatrix format
+dtrain <- xgb.DMatrix(data = train_x, label = train_y)
+dtest <- xgb.DMatrix(data = test_x, label = test_y)
+# Set XGBoost parameters
+params <- list(
+  objective = "binary:logistic",
+  eval_metric = "aucpr",
+  max_depth = 7,
+  eta = 0.05,
+  gamma = 2,
+  subsample = 0.8,
+  colsample_bytree = 0.8,
+  lambda = 5,
+  alpha = 1
+)
+
+# Train on sessions 2-17
+xgb_model <- xgb.train(
+  params = params,
+  data = dtrain,
+  nrounds = 300,
+  watchlist = list(train = dtrain, test = dtest),
+  early_stopping_rounds = 20,
+  verbose = 1
+)
+
+
+
+# Save model
+xgb.save(xgb_model, "/Users/chenbohan/Desktop/STA141AProject/data/xgboost_model.model")
+```
+
+### 1. Findings from Data Analysis
+
+```         
+Decision success depends on contrast differences:
+Large contrast differences → higher success rates.
+Small contrast differences → mice struggle more.
+Neural activity trends suggest late-stage firing rates play a key role in decision-making.
+PCA transformation has been applied, simplifying the dataset while retaining important features.
+```
+
+# 7 Prediction performance on the test sets
+
+## 7.1 Evaluate Model on Test Data (Sessions 1 & 18)
+
+```{r, echo=FALSE}
+
+# Make predictions on the test set
+predictions <- predict(xgb_model, dtest)
+
+# Convert probabilities to binary class (Threshold = 0.5)
+pred_labels <- ifelse(predictions > 0.5, 1, 0)
+
+# Compute accuracy
+accuracy <- mean(pred_labels == test_y)
+cat("XGBoost Model Accuracy on Sessions 1 & 18:", accuracy, "\n")
+
+# Confusion Matrix
+conf_matrix <- table(Predicted = pred_labels, Actual = test_y)
+print(conf_matrix)
+
+# Plot feature importance
+importance_matrix <- xgb.importance(feature_names = colnames(train_x), model = xgb_model)
+xgb.plot.importance(importance_matrix)
+```
+
+### 1. Model Accuracy on Sessions 1 & 18
+
+```         
+XGBoost Model Accuracy: 0.7969 (~79.7%)
+Decent accuracy (~80%) suggests the model can predict success reasonably well.
+Some misclassifications indicate possible areas for improvement.
+```
+
+# 8 Discussion
+
+## 1. Confusion Matrix Analysis
+
+```         
+     Actual
+```
+
+Predicted 0 1 0 32 12 1 55 231 True Positives (231): Correctly predicted successful trials.
+True Negatives (32): Correctly predicted unsuccessful trials.
+False Positives (55): Model predicted success, but the trial actually failed.
+False Negatives (12): Model predicted failure, but the trial actually succeeded.
+High False Positive Rate (55 cases)
+
+## 2. Feature Importance Analysis
+
+```         
+1.1 Norm_late_firing and late_firing_rate are the most influential factors
+1.2 Late-stage neural activity is the strongest predictor of success.
+```
+
+This suggests that the final phase of neuronal activity plays a critical role in decision-making.
+2.1 Cumulative_success is also highly significant This means past success strongly influences future trial outcomes.
+3.1 Abs_contrast_diff (absolute contrast difference) is a key factor Larger contrast differences increase success rates, confirming that higher visual contrast simplifies decision-making.
+4.1 Learly_firing_rate is less important than late firing Suggests that early-stage neural activity is less predictive of success.
+5.1 Contrast_left and contrast_right have relatively lower importance This may indicate that contrast effects are already captured through abs_contrast_diff.
