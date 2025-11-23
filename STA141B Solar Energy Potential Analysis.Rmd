@@ -1,0 +1,414 @@
+---
+title: "STA141B HW1 Part1"
+author: "Bohan Chen"
+date: "2025-04-08"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+# Set Up File Paths and Enumerate the Zip Files
+```{r}
+#Set Up File Paths and Enumerate the Zip Files
+dir_path <- "~/Desktop/Solar1"
+zip_files <- list.files(dir_path, pattern = "\\.zip$", full.names = TRUE)
+
+zip_files
+```
+
+
+
+# Verify whether each unzipped folder contains a .clm file
+```{r}
+#Verify whether each unzipped folder contains a .clm file
+solar1_dir <- "~/Desktop/Solar1"
+
+clm_folders <- list.dirs(solar1_dir, recursive = FALSE)
+
+for (folder in clm_folders) {
+  clm_files <- list.files(folder, pattern = "\\.clm$", full.names = TRUE)
+  
+  if (length(clm_files) == 0) {
+    cat("Folder:", folder, "--> NO .clm FILE FOUND!\n")
+  } else {
+    cat("Folder:", folder, "--> Found .clm file(s):\n")
+    cat("           ", paste(basename(clm_files), collapse = ", "), "\n")
+  }
+}
+```
+# Define the Function 
+```{r}
+#Define the Function 
+readClmFile <- function(file_path) {
+  lines <- readLines(file_path)
+  
+  n <- length(lines)
+  i <- 1
+  results_list <- list()
+  
+  while (i <= n) {
+    line <- lines[i]
+    
+    if (grepl("^\\* day\\s+\\d+ month\\s+\\d+", line)) {
+      match_vec <- regmatches(line, regexec("^\\* day\\s+(\\d+) month\\s+(\\d+)", line))[[1]]
+      day_val   <- as.integer(match_vec[2])  
+      month_val <- as.integer(match_vec[3])  
+
+      data_start <- i + 1
+      data_end   <- i + 24
+      if (data_end > n) {
+        stop("Not enough lines for day=", day_val, ", month=", month_val)
+      }
+
+      data_lines <- lines[data_start:data_end]
+      mat <- do.call(rbind, lapply(data_lines, function(x) {
+        as.numeric(strsplit(x, ",")[[1]])
+      }))
+      
+      hours <- 0:23
+      df_day <- data.frame(
+        day        = rep(day_val, 24),
+        month      = rep(month_val, 24),
+        hour       = hours,
+        diffuse    = mat[,1],
+        temp_tenths= mat[,2],
+        direct     = mat[,3],
+        wind_speed_tenths = mat[,4],
+        wind_dir   = mat[,5],
+        rh_percent = mat[,6],
+        stringsAsFactors   = FALSE
+      )
+      
+      results_list[[length(results_list) + 1]] <- df_day
+      i <- data_end + 1
+    } else {
+      i <- i + 1
+    }
+  }
+  
+  final_df <- do.call(rbind, results_list)
+  return(final_df)
+}
+```
+
+
+
+# After the function is defined, call it for each 5 locations
+```{r}
+#After the function is defined, call it for each 5 locations
+# 1) Mammoth
+file_path_mammoth <- "/Users/chenbohan/Desktop/Solar1/USA_CA_Mammoth.Yosemite.AP.723894_TMYx.2009-2023 2/USA_CA_Mammoth.Yosemite.AP.723894_TMYx.2009-2023.clm"
+df_mammoth <- readClmFile(file_path_mammoth)
+head(df_mammoth)
+summary(df_mammoth)
+
+# 2) UC Davis
+file_path_ucdavis <- "/Users/chenbohan/Desktop/Solar1/USA_CA_UC-Davis-University.AP.720576_TMYx.2009-2023/USA_CA_UC-Davis-University.AP.720576_TMYx.2009-2023.clm"
+df_ucdavis <- readClmFile(file_path_ucdavis)
+head(df_ucdavis)
+summary(df_ucdavis)
+
+# 3) San Diego (Miramar)
+file_path_sandiego <- "/Users/chenbohan/Desktop/Solar1/USA_CA_San.Diego-MCAS.Miramar.722930_TMYx.2009-2023/USA_CA_San.Diego-MCAS.Miramar.722930_TMYx.2009-2023.clm"
+df_sandiego <- readClmFile(file_path_sandiego)
+head(df_sandiego)
+summary(df_sandiego)
+
+# 4) Mount Shasta
+file_path_shasta <- "/Users/chenbohan/Desktop/Solar1/USA_CA_Mount.Shasta.725957_TMYx.2009-2023/USA_CA_Mount.Shasta.725957_TMYx.2009-2023.clm"
+df_shasta <- readClmFile(file_path_shasta)
+head(df_shasta)
+summary(df_shasta)
+
+# 5) Point Arguello
+file_path_arguello <- "/Users/chenbohan/Desktop/Solar1/USA_CA_Point.Arguello.994210_TMYx.2009-2023/USA_CA_Point.Arguello.994210_TMYx.2009-2023.clm"
+df_arguello <- readClmFile(file_path_arguello)
+head(df_arguello)
+summary(df_arguello)
+
+```
+
+
+
+
+
+# 1.Checklist to verify the .clm data frames are correct
+
+## 1.class()
+```{r}
+class(df_mammoth)
+class(df_ucdavis)
+class(df_sandiego)
+class(df_shasta)
+class(df_arguello)
+```
+
+
+This confirms that each of your parsed .clm files has been successfully loaded into R as a data frame. 
+
+
+## 2.dim()
+```{r}
+dim(df_mammoth)  
+dim(df_ucdavis)
+dim(df_sandiego)
+dim(df_shasta)
+dim(df_arguello)
+```
+
+We used dim() to confirm that each location’s data frame has 8760 rows and 9 columns. The 8760 rows match the expected number of hourly observations in a year (365 days × 24 hours), and the 9 columns reflect the correct structure: three time columns (day, month, hour) and six climate variables.
+
+
+## 3.names()
+```{r}
+names(df_mammoth)
+names(df_ucdavis)
+names(df_sandiego)
+names(df_shasta)
+names(df_arguello)
+```
+
+
+We used the names() function to verify that each data frame contains the correct column names. All five datasets had identical and expected column labels: day, month, hour, diffuse, temp_tenths, direct, wind_speed_tenths, wind_dir, and rh_percent. This confirms our function accurately extracted and labeled each field from the .clm files.
+
+
+
+## 4.str()
+```{r}
+str(df_mammoth)
+str(df_ucdavis)
+str(df_sandiego)
+str(df_shasta)
+str(df_arguello)
+```
+
+
+We used the str() function to examine the structure of each data frame. Each had 8760 rows and 9 columns, indicating a full year of hourly data. All variables had appropriate data types: integers for day, month, and hour, and numerics for the six climate-related measurements. This confirms our .clm file parsing logic worked consistently and accurately across all locations.
+
+
+# 2. Check for Missing Values (NAs)
+
+## 1.Total NAs
+```{r}
+sum(is.na(df_mammoth))
+sum(is.na(df_ucdavis))
+sum(is.na(df_sandiego))
+sum(is.na(df_shasta))
+sum(is.na(df_arguello))
+```
+
+
+We programmatically verified the completeness of each dataset by checking for missing values using sum(is.na(...)). All five locations — Mammoth, UC Davis, San Diego, Mount Shasta, and Point Arguello — returned zero missing values, confirming that all rows and columns were successfully read and parsed with no data loss.
+
+
+
+## 2.NAs per Column
+```{r}
+#NAs per Column
+sapply(df_mammoth, function(col) sum(is.na(col)))
+sapply(df_ucdavis, function(col) sum(is.na(col)))
+sapply(df_sandiego, function(col) sum(is.na(col)))
+sapply(df_shasta, function(col) sum(is.na(col)))
+sapply(df_arguello, function(col) sum(is.na(col)))
+```
+
+We verified that each individual column in the data frames contained no missing values. We used sapply(..., function(col) sum(is.na(col))) to check each variable. All columns across all five locations — including diffuse, temp_tenths, direct, and others — returned zero NAs, confirming the integrity and completeness of the imported data at the column level.
+
+
+
+# 3.Use summary() to get min, max, median, mean, etc
+```{r}
+#Use summary() to get min, max, median, mean, etc
+summary(df_mammoth)
+summary(df_ucdavis)
+summary(df_sandiego)
+summary(df_shasta)
+summary(df_arguello)
+```
+
+
+
+
+We used the summary() function to inspect the range and distribution of each variable across all five datasets. This confirmed several key assumptions:
+That day ranged from 1 to 31, month from 1 to 12, and hour from 0 to 23, which supports the assumption that each day is represented by exactly 24 rows.
+That all climate measurements (e.g., temperature in tenths of °C, solar radiation in W/m², humidity in %) were within plausible physical ranges.
+That no obviously invalid values appeared.
+
+
+# 4.Graphical Checks
+
+## 1.Histograms 
+```{r}
+#Histograms 
+hist(df_mammoth$temp_tenths / 10, main = "Mammoth Temperatures (C)",
+     xlab = "Temperature (C)")
+
+hist(df_ucdavis$temp_tenths / 10, 
+     main = "UC Davis Temperatures (C)",
+     xlab = "Temperature (C)")
+
+hist(df_sandiego$temp_tenths / 10, 
+     main = "San Diego Temperatures (C)",
+     xlab = "Temperature (C)")
+
+hist(df_shasta$temp_tenths / 10, 
+     main = "Mount Shasta Temperatures (C)",
+     xlab = "Temperature (C)")
+
+hist(df_arguello$temp_tenths / 10, 
+     main = "Point Arguello Temperatures (C)",
+     xlab = "Temperature (C)")
+```
+
+
+
+
+These plots help verify:
+Units were handled correctly (i.e., converted from tenths of °C).
+No outliers or unrealistic values appeared (e.g., no temperatures >50°C or <-30°C).
+The shapes and ranges of the distributions match our expectations based on each location’s real-world climate.
+No parsing errors or missing data blocks
+
+
+
+
+
+
+## 2.Scatter Plots
+```{r}
+#Scatter Plots
+plot(df_mammoth$hour, df_mammoth$diffuse,
+     main = "Hour vs. Diffuse Solar (Mammoth)",
+     xlab = "Hour", ylab = "Diffuse (W/m^2)")
+
+plot(df_ucdavis$hour, df_ucdavis$diffuse,
+     main = "Hour vs. Diffuse Solar (UC Davis)",
+     xlab = "Hour", ylab = "Diffuse (W/m^2)")
+
+plot(df_sandiego$hour, df_sandiego$diffuse,
+     main = "Hour vs. Diffuse Solar (San Diego)",
+     xlab = "Hour", ylab = "Diffuse (W/m^2)")
+
+plot(df_shasta$hour, df_shasta$diffuse,
+     main = "Hour vs. Diffuse Solar (Mount Shasta)",
+     xlab = "Hour", ylab = "Diffuse (W/m^2)")
+
+plot(df_arguello$hour, df_arguello$diffuse,
+     main = "Hour vs. Diffuse Solar (Point Arguello)",
+     xlab = "Hour", ylab = "Diffuse (W/m^2)")
+```
+
+
+
+These plots confirm that the diffuse solar radiation values follow expected daily patterns, giving strong evidence that:
+
+The .clm files were read and parsed correctly.
+The hour column is accurate.
+The diffuse column is interpreted correctly (units and scaling).
+The datasets are complete for 24-hour cycles 
+
+
+
+
+
+
+
+
+
+
+# Manually comparing individual values in the files and the results
+I Open the .clm file manually navigate to:/Users/chenbohan/Desktop/Solar1/USA_CA_Mammoth.Yosemite.AP.723894_TMYx.2009-2023/
+And open it with Textedit and then I locate the target lines:* day  1 month  1 and the data is below:
+* day  1 month  1
+ 0,-90,0,26,10,77
+ 0,-90,0,21,310,70
+ 0,-90,0,0,180,70
+ 0,-90,0,0,187,64
+ 0,-80,0,0,192,78
+ 0,-110,0,0,172,70
+ 0,-120,0,0,174,69
+ 0,-130,0,15,340,69
+ 33,-90,355,0,187,70
+ 61,-50,774,21,310,54
+ 73,-10,897,21,130,42
+ 79,10,967,31,140,33
+ 81,50,975,21,120,44
+ 83,60,944,21,130,38
+ 87,8,834,26,110,37
+ 88,4,554,15,120,40
+ 53,5,0,31,110,37
+ 10,0,0,0,208,39
+ 0,-20,0,15,150,46
+ 0,-40,0,15,60,59
+ 0,-70,0,0,221,70
+ 0,-90,0,15,30,57
+ 0,-90,0,0,215,58
+ 0,-90,0,21,250,60
+I compare the data with the corresponding rows in df_mammoth. The values matched exactly for all six columns, confirming that the parsing function extracted the correct data. And then I do both steps for other 4 locations and get the same result which confirms that the parsing function extracted the correct data for both 5 locations.
+
+
+# Identify Assumptions
+
+Assumption: The files represent data across a full year with months ranging from 1 to 12 for all 5 locations.
+Verification: We summary() on each data frame and observed that the month variable spans from 1 to 12 in all cases, as expected.
+
+Assumption: Each location's .clm file should contain 365 days × 24 hours = 8,760 rows of data.
+Verification: We used dim(df_<location>) for each data frame and confirmed that each has exactly 8,760 rows and 9 columns
+
+Assumption: Day values should be between 1 and 31 depending on the month.
+Verification: We summary() on each data frame and observed that day ranges from 1–31, consistent with expectations.
+
+
+# ANOVA Table
+
+In this study, a one-way ANOVA was applied to compare daily average temperature, daily average relative humidity, daily average wind speed, and total daily solar radiation across five different California weather stations. This test allows us to formally evaluate whether location has a statistically significant effect on these key climate variables.
+
+```{r}
+library(dplyr)
+library(readr)
+
+# Five location path
+files <- c(
+"/Users/chenbohan/Desktop/Solar1/USA_CA_Mammoth.Yosemite.AP.723894_TMYx.2009-2023 2/USA_CA_Mammoth.Yosemite.AP.723894_TMYx.2009-2023.clm",
+"/Users/chenbohan/Desktop/Solar1/USA_CA_Mount.Shasta.725957_TMYx.2009-2023/USA_CA_Mount.Shasta.725957_TMYx.2009-2023.clm",
+"/Users/chenbohan/Desktop/Solar1/USA_CA_Point.Arguello.994210_TMYx.2009-2023/USA_CA_Point.Arguello.994210_TMYx.2009-2023.clm",
+"/Users/chenbohan/Desktop/Solar1/USA_CA_San.Diego-MCAS.Miramar.722930_TMYx.2009-2023/USA_CA_San.Diego-MCAS.Miramar.722930_TMYx.2009-2023.clm",
+"/Users/chenbohan/Desktop/Solar1/USA_CA_UC-Davis-University.AP.720576_TMYx.2009-2023/USA_CA_UC-Davis-University.AP.720576_TMYx.2009-2023.clm"
+)
+files
+
+
+all_data <- bind_rows(lapply(files, function(f){
+  df <- readClmFile(f)
+  df$location <- sub("_TMYx.*","", basename(dirname(f)))
+  return(df)
+}))
+
+daily_data <- all_data %>%
+  mutate(
+    temp = temp_tenths / 10,
+    wind = wind_speed_tenths / 10,
+    solar = diffuse + direct
+  ) %>%
+  group_by(location, month, day) %>%
+  summarise(
+    mean_temp = mean(temp),
+    mean_rh   = mean(rh_percent),
+    mean_wind = mean(wind),
+    total_solar = sum(solar),
+    .groups = "drop"
+  )
+anova_temp  <- summary(aov(mean_temp ~ location, data = daily_data))
+anova_rh    <- summary(aov(mean_rh ~ location, data = daily_data))
+anova_wind  <- summary(aov(mean_wind ~ location, data = daily_data))
+anova_solar <- summary(aov(total_solar ~ location, data = daily_data))
+
+print(anova_temp)
+print(anova_rh)
+print(anova_wind)
+print(anova_solar)
+```
+
+## Conclusion: 
+For all four ANOVA tests (daily average temperature, daily average relative humidity, daily average wind speed, and daily total solar radiation), the p-values are all less than 2 × 10^-16, which is far below the significance level α = 0.05. Therefore, we reject the null hypothesis that the mean values of these climate variables are equal across the five locations.
+In other words, we conclude that there are statistically significant differences in daily temperature, humidity, wind speed, and solar radiation among the five California weather stations. This result suggests that geographic location has a strong and significant impact on regional climate characteristics.
