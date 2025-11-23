@@ -1,0 +1,723 @@
+---
+title: 'STA141B SQL and Relational Databases'
+author: "Bohan Chen"
+date: "2025-05-17"
+output: html_document
+---
+
+## 1. How many teams are there in the database? how many teams are there in 2022? List the names of the teams for 2022,including the league and division they are in and how many games they won and lost in that year. Group the results by league, division and then by games won.
+```{r}
+library(DBI)
+library(RSQLite)
+
+con <- dbConnect(RSQLite::SQLite(), "/Users/chenbohan/Desktop/lahman_1871-2022.sqlite")
+dbListTables(con)
+
+```
+
+```{r}
+# 1. Total number of distinct teams in the full database
+dbGetQuery(con, "
+  SELECT COUNT(DISTINCT teamID) AS total_teams
+  FROM Teams
+")
+
+# 2. Number of teams that played in 2022
+dbGetQuery(con, "
+  SELECT COUNT(*) AS teams_in_2022
+  FROM Teams
+  WHERE yearID = 2022
+")
+
+# 3. List of team names and stats for 2022, grouped by league/division and sorted by wins
+teams_2022 <- dbGetQuery(con, "
+  SELECT name, lgID AS league, divID AS division, W AS wins, L AS losses
+  FROM Teams
+  WHERE yearID = 2022
+  ORDER BY league, division, wins DESC
+")
+print(teams_2022)
+
+```
+
+
+
+Interpretation:
+There have been 149 different team IDs in the MLB database historically, and 30 teams were in the 2022 season. 
+
+Explanation:
+I used three queries to:
+Count the number of distinct teamID values to capture historical team variety.
+Count rows where yearID = 2022 to get current teams.
+Select team names and win/loss records for 2022 and sort them by league, division, and number of wins to group the output meaningfully.
+
+Figure Out:
+The teamID is used to track franchises across years, even if names or cities change.
+The lgID and divID fields in the Teams table help group results by league and division.
+
+
+
+
+## 2. What are the 10 teams that had the highest average attendance since 2015? Give the name and the average and total attendance for this period for each time.
+```{r}
+top_attendance <- dbGetQuery(con, "
+  SELECT 
+    name, 
+    teamID,
+    SUM(attendance) AS total_attendance,
+    COUNT(attendance) AS seasons_played,
+    ROUND(1.0 * SUM(attendance) / COUNT(attendance)) AS avg_attendance
+  FROM Teams
+  WHERE yearID >= 2015 AND attendance IS NOT NULL
+  GROUP BY teamID, name
+  ORDER BY avg_attendance DESC
+  LIMIT 10
+")
+print(top_attendance)
+```
+
+Interpretation:
+The Los Angeles Dodgers had the highest average attendance per season since 2015, followed closely by the St. Louis Cardinals.
+
+Explanation:
+I filtered the Teams table for rows where yearID >= 2015 and attendance IS NOT NULL.
+I grouped by both teamID and name to ensure uniqueness.
+I used SUM(attendance) for total attendance and divided by the count of non-null attendance records to compute the average.
+ORDER BY avg_attendance DESC ranks the teams by their average attendance over the years.
+LIMIT 10 shows the top 10.
+
+Figure Out:Grouping by both teamID and name helps ensure correct aggregation for teams with consistent branding.
+
+
+
+
+## 3. Who are the 10 people that had the “longest” career, i.e., spans the largest number of years? Who are the 10 people that played the most number of games
+```{r}
+# Part (a): 10 players with the longest career span in years
+longest_careers <- dbGetQuery(con, "
+  SELECT 
+    p.nameFirst || ' ' || p.nameLast AS name,
+    MIN(b.yearID) AS first_year,
+    MAX(b.yearID) AS last_year,
+    MAX(b.yearID) - MIN(b.yearID) + 1 AS career_span
+  FROM Batting b
+  JOIN People p ON b.playerID = p.playerID
+  GROUP BY b.playerID
+  ORDER BY career_span DESC
+  LIMIT 10
+")
+
+# Part (b): 10 players who played the most total games
+most_games <- dbGetQuery(con, "
+  SELECT 
+    p.nameFirst || ' ' || p.nameLast AS name,
+    SUM(b.G) AS total_games
+  FROM Batting b
+  JOIN People p ON b.playerID = p.playerID
+  GROUP BY b.playerID
+  ORDER BY total_games DESC
+  LIMIT 10
+")
+
+print(longest_careers)
+
+print(most_games)
+```
+
+Interpretation:
+Nick Altrock had the longest official career span 36 years,Pete Rose played the most games in MLB history 3562.
+
+Explanation:
+Part (a) finds the longest time between first and last year played, using MIN() and MAX() on yearID from the Batting table.
+I added +1 to ensure inclusive counting (e.g., 2000–2001 = 2 years).
+Part (b) sums all games played (G) per player and ranks them.
+
+
+
+## 4. Compute which team won the world series in 2022? Include the team name, league, division, number of games won and lost during the season, and the total number of games in the world series
+```{r}
+ws_2022 <- dbGetQuery(con, "
+  SELECT 
+    t.name AS team_name,
+    t.lgID AS league,
+    t.divID AS division,
+    t.W AS regular_season_wins,
+    t.L AS regular_season_losses,
+    s.wins + s.losses AS world_series_total_games
+  FROM SeriesPost s
+  JOIN Teams t
+    ON s.teamIDwinner = t.teamID AND s.yearID = t.yearID
+  WHERE s.yearID = 2022 AND s.round = 'WS'
+")
+
+print(ws_2022)
+```
+
+Interpretation:
+The Houston Astros won the 2022 World Series. They are a member of the American League (AL) and play in the Western Division (W).
+During the regular season, they recorded 106 wins and 56 losses. The World Series lasted 6 games, indicating a 4–2 series result.
+
+Explanation:
+The winner is identified from SeriesPost where round = 'WS' and yearID = 2022.
+The teamIDwinner in SeriesPost is joined with the Teams table to get full team information.
+The number of games played in the World Series was calculated as wins + losses from the SeriesPost table.
+
+Figure Out:
+I had to join SeriesPost with Teams using both teamID and yearID to get team name, league, and division.
+s.wins + s.losses provided the total number of games played in the series, since no direct "total games" field exists.
+
+## 5. Compute the winner and the loser of the world series for all years. Include the team name, league, division, number of games won and lost during the season for both the winning and the losing team
+```{r}
+ws_all_years <- dbGetQuery(con, "
+  SELECT 
+    s.yearID,
+    
+    -- Winning team info
+    t_win.name AS winner_name,
+    t_win.lgID AS winner_league,
+    t_win.divID AS winner_division,
+    t_win.W AS winner_wins,
+    t_win.L AS winner_losses,
+    
+    -- Losing team info
+    t_lose.name AS loser_name,
+    t_lose.lgID AS loser_league,
+    t_lose.divID AS loser_division,
+    t_lose.W AS loser_wins,
+    t_lose.L AS loser_losses
+
+  FROM SeriesPost s
+  JOIN Teams t_win 
+    ON s.teamIDwinner = t_win.teamID AND s.yearID = t_win.yearID
+  JOIN Teams t_lose 
+    ON s.teamIDloser = t_lose.teamID AND s.yearID = t_lose.yearID
+  WHERE s.round = 'WS'
+  ORDER BY s.yearID DESC
+")
+
+print(ws_all_years)
+```
+Explanation:
+I used the SeriesPost table to get the World Series (round = 'WS') for each year.
+I joined the Teams table twice: once to get info for the winning team, and once for the losing team, using both teamID and yearID.
+
+
+Explanation:
+I used the SeriesPost table to get the World Series (round = 'WS') for each year.
+I joined the Teams table twice: once to get info for the winning team, and once for the losing team, using both teamID and yearID.
+
+
+
+
+## 6. Compute the total payroll for each team for each year. Plot these. Bonus: In the SQL query, also compute whether the team won or lost the world series for that year and add that to the plot
+```{r}
+payroll_ws <- dbGetQuery(con, "
+  SELECT 
+    s.yearID,
+    s.teamID,
+    t.name AS team_name,
+    SUM(s.salary) AS total_payroll,
+
+    CASE 
+      WHEN s.teamID = sp.teamIDwinner THEN 'Winner'
+      WHEN s.teamID = sp.teamIDloser THEN 'Loser'
+      ELSE 'No'
+    END AS world_series_result
+
+  FROM Salaries s
+  LEFT JOIN Teams t 
+    ON s.teamID = t.teamID AND s.yearID = t.yearID
+  LEFT JOIN SeriesPost sp 
+    ON s.yearID = sp.yearID AND sp.round = 'WS'
+
+  GROUP BY s.yearID, s.teamID
+  ORDER BY s.yearID, total_payroll DESC
+")
+print(payroll_ws)
+
+```
+
+```{r}
+library(ggplot2)
+ggplot(payroll_ws, aes(x = yearID, y = total_payroll / 1e6, color = world_series_result)) +
+  geom_point(alpha = 0.7) +
+  labs(title = "Total Payroll by Team and World Series Result",
+       x = "Year",
+       y = "Payroll",
+       color = "World Series Result") 
+```
+
+
+Interpretation:
+Winning the World Series sometimes happens with mid-range payrolls, showing that success depends on more than just money.
+Payroll inflation is visible, with 1980s teams mostly below $30 million and post-2010 teams often exceeding $50 million.
+
+Explanation:
+I joined Salaries with Teams to get names and divisions, and with SeriesPost to identify winners and losers.
+A CASE block determined whether each team was a World Series Winner, Loser, or Not in the WS.
+Payroll was aggregated per team per year using SUM(s.salary).
+The plot was created using ggplot2 and colored by WS result.
+
+Figure Out:Data ends at 2016 for payroll (Salaries table) — that’s the latest year visible in the plot.
+
+
+
+## 7. What are the 10 colleges/universities that have produced the most players in MLB since 2000? Give the college name, city and state and the number of players they have produced in this time period.
+```{r}
+top_colleges <- dbGetQuery(con, "
+  SELECT 
+    sc.name_full AS college_name,
+    sc.city,
+    sc.state,
+    COUNT(DISTINCT cp.playerID) AS num_players
+  FROM CollegePlaying cp
+  JOIN People p ON cp.playerID = p.playerID
+  JOIN Schools sc ON cp.schoolID = sc.schoolID
+  WHERE p.debut >= '2000-01-01'
+  GROUP BY cp.schoolID
+  ORDER BY num_players DESC
+  LIMIT 10
+")
+
+print(top_colleges)
+```
+Interpretation:
+California dominates the list, with 4 of the top 10 colleges coming from the state.
+Stanford University and Cal State Long Beach tie for the most MLB players 29 each.
+
+Explanation:
+I joined CollegePlaying, People, and Schools to link player IDs to schools, filter by debut year, and retrieve location info.
+The debut field is stored in text, so filtering by '2000-01-01' works correctly in SQLite.
+I used COUNT(DISTINCT cp.playerID) to avoid counting the same player more than once if they appeared in multiple college seasons.
+Sorting by number of players and using LIMIT 10 returned the top-producing programs.
+
+Figure Out:University naming varies in the database, so I used schoolID not just name to ensure correct grouping.
+
+
+
+## 8. How many all-star games are there each year? How many players are there in each all-star game(s) each year?
+```{r}
+# How many All-Star games per year 
+allstar_game_counts <- dbGetQuery(con, "
+  SELECT 
+    yearID, 
+    COUNT(DISTINCT gameNum) AS num_allstar_games
+  FROM AllstarFull
+  GROUP BY yearID
+  ORDER BY yearID
+")
+
+print(allstar_game_counts)
+
+# Number of players in each All-Star game 
+allstar_players_per_game <- dbGetQuery(con, "
+  SELECT 
+    yearID, 
+    gameNum, 
+    COUNT(DISTINCT playerID) AS num_players
+  FROM AllstarFull
+  GROUP BY yearID, gameNum
+  ORDER BY yearID, gameNum
+")
+
+print(allstar_players_per_game)
+```
+
+
+Explanation:
+The AllstarFull table lists individual player appearances in All-Star Games.
+I used COUNT(DISTINCT gameNum) to find how many games were played each year.
+I used COUNT(DISTINCT playerID) to find how many unique players appeared per game.
+The value of gameNum = 0 indicates the only game for each of these years.
+
+
+## 9. Consider players who have appeared in at least 15 all-star games. How many all-star games have they played in? Give the players’ names, teams and years for each year, in which they were in the all-star games, and the first and last year they were in an all-star game.
+```{r}
+allstar_15plus <- dbGetQuery(con, "
+  SELECT 
+    p.playerID,
+    p.nameFirst || ' ' || p.nameLast AS name,
+    COUNT(*) AS num_allstar_games,
+    MIN(a.yearID) AS first_year,
+    MAX(a.yearID) AS last_year
+  FROM AllstarFull a
+  JOIN People p ON a.playerID = p.playerID
+  GROUP BY a.playerID
+  HAVING COUNT(*) >= 15
+  ORDER BY num_allstar_games DESC
+")
+
+print(allstar_15plus)
+
+allstar_details <- dbGetQuery(con, "
+  SELECT 
+    p.nameFirst || ' ' || p.nameLast AS name,
+    a.yearID,
+    a.teamID
+  FROM AllstarFull a
+  JOIN People p ON a.playerID = p.playerID
+  WHERE a.playerID IN (
+    SELECT playerID
+    FROM AllstarFull
+    GROUP BY playerID
+    HAVING COUNT(*) >= 15
+  )
+  ORDER BY name, yearID
+")
+
+print(allstar_details)
+```
+Interpretation:
+Willie Mays appeared in the most All-Star Games 26, followed closely by Hank Aaron and Stan Musial.
+
+Interpretation:
+Willie Mays appeared in the most All-Star Games (26), followed closely by Hank Aaron and Stan Musial.
+
+
+## 10. Find the 10 players who have appeared in the most number of years in the playoffs. This is the number of years, not the total number of playoff games they were in. Return the table with the person’s name, number of years they have been in the playoffs, the first and last year they appeared in the playoffs, and the number of different teams they appeared for in the playoffs. Bonus: Include the average salary (over all the years they played) for each of the individual
+```{r}
+playoff_years <- dbGetQuery(con, "
+  SELECT 
+    p.nameFirst || ' ' || p.nameLast AS name,
+    bp.playerID,
+    COUNT(DISTINCT bp.yearID) AS num_playoff_years,
+    MIN(bp.yearID) AS first_playoff_year,
+    MAX(bp.yearID) AS last_playoff_year,
+    COUNT(DISTINCT bp.teamID) AS num_playoff_teams
+  FROM BattingPost bp
+  JOIN People p ON bp.playerID = p.playerID
+  GROUP BY bp.playerID
+  ORDER BY num_playoff_years DESC
+  LIMIT 10
+")
+
+print(playoff_years)
+playoff_years_salary <- dbGetQuery(con, "
+  SELECT 
+    p.nameFirst || ' ' || p.nameLast AS name,
+    bp.playerID,
+    COUNT(DISTINCT bp.yearID) AS num_playoff_years,
+    MIN(bp.yearID) AS first_playoff_year,
+    MAX(bp.yearID) AS last_playoff_year,
+    COUNT(DISTINCT bp.teamID) AS num_playoff_teams,
+    ROUND(AVG(s.salary), 0) AS avg_salary
+  FROM BattingPost bp
+  JOIN People p ON bp.playerID = p.playerID
+  LEFT JOIN Salaries s ON bp.playerID = s.playerID
+  GROUP BY bp.playerID
+  ORDER BY num_playoff_years DESC
+  LIMIT 10
+")
+
+print(playoff_years_salary)
+```
+
+
+Interpretation:
+Derek Jeter and Mariano Rivera each appeared in the playoffs in 16 different years
+The average salaries show that long careers and playoff consistency often coincide with high compensation — especially in modern baseball.
+
+
+Explanation:
+I used the BattingPost table to count unique playoff years (COUNT(DISTINCT bp.yearID)).
+People provided full names, and Salaries was used (via LEFT JOIN) to compute career-wide salary averages.
+Grouping by playerID gave each player’s summary stats. The salary average includes all years with salary data, not just playoff seasons.
+
+
+
+
+
+
+## Verify the Result use only R 
+
+Q1
+```{r}
+teams <- dbReadTable(con, "Teams")
+
+# 1. Total number of distinct teams in the full database
+total_teams_r <- length(unique(teams$teamID))
+cat("Total distinct teams:", total_teams_r, "\n")
+
+# 2. Number of teams that played in 2022
+teams_2022_r <- subset(teams, yearID == 2022)
+cat("Teams in 2022:", nrow(teams_2022_r), "\n")
+
+# 3. List team names and stats for 2022, grouped by league/division, sorted by wins descending
+teams_2022_grouped <- teams_2022_r[order(teams_2022_r$lgID, teams_2022_r$divID, -teams_2022_r$W), ]
+teams_2022_display <- teams_2022_grouped[, c("name", "lgID", "divID", "W", "L")]
+
+print(teams_2022_display)
+```
+
+The output is match the result that using SQL.
+
+
+
+Q2
+```{r}
+teams <- dbReadTable(con, "Teams")
+
+teams_recent <- subset(teams, yearID >= 2015 & !is.na(attendance))
+
+attendance_summary <- aggregate(attendance ~ teamID + name, teams_recent, 
+                                function(x) c(total = sum(x), avg = mean(x)))
+
+attendance_summary <- do.call(data.frame, attendance_summary)
+
+names(attendance_summary) <- c("teamID", "name", "total_attendance", "avg_attendance")
+
+attendance_top10 <- attendance_summary[order(-attendance_summary$avg_attendance), ][1:10, ]
+
+print(attendance_top10)
+```
+
+The output is match the result that using SQL.
+
+
+Q3
+```{r}
+batting <- dbReadTable(con, "Batting")
+people <- dbReadTable(con, "People")
+
+career_span <- aggregate(yearID ~ playerID, batting, function(x) max(x) - min(x) + 1)
+names(career_span)[2] <- "career_span"
+
+career_years <- aggregate(yearID ~ playerID, batting, function(x) c(first = min(x), last = max(x)))
+career_years <- do.call(data.frame, career_years)
+names(career_years) <- c("playerID", "first_year", "last_year")
+
+career_long <- merge(career_span, career_years, by = "playerID")
+
+career_long_named <- merge(career_long, people[, c("playerID", "nameFirst", "nameLast")], by = "playerID")
+career_long_named$name <- paste(career_long_named$nameFirst, career_long_named$nameLast)
+
+# Top 10 longest careers
+longest_careers_r <- career_long_named[order(-career_long_named$career_span), c("name", "first_year", "last_year", "career_span")][1:10, ]
+print(longest_careers_r)
+
+
+# 2. Most total games played
+games_played <- aggregate(G ~ playerID, batting, sum, na.rm = TRUE)
+games_named <- merge(games_played, people[, c("playerID", "nameFirst", "nameLast")], by = "playerID")
+games_named$name <- paste(games_named$nameFirst, games_named$nameLast)
+
+# Top 10 most games
+most_games_r <- games_named[order(-games_named$G), c("name", "G")][1:10, ]
+names(most_games_r)[2] <- "total_games"
+print(most_games_r)
+```
+
+The output is match the result that using SQL.
+
+
+Q4
+```{r}
+teams <- dbReadTable(con, "Teams")
+series <- dbReadTable(con, "SeriesPost")
+
+ws_2022 <- subset(series, yearID == 2022 & round == "WS")
+
+team_2022 <- subset(teams, yearID == 2022 & teamID == ws_2022$teamIDwinner)
+
+team_2022$world_series_total_games <- ws_2022$wins + ws_2022$losses
+
+winner_2022 <- team_2022[, c("name", "lgID", "divID", "W", "L", "world_series_total_games")]
+names(winner_2022) <- c("team_name", "league", "division", "wins", "losses", "world_series_total_games")
+
+print(winner_2022)
+```
+
+The output is match the result that using SQL.
+
+
+Q5
+```{r}
+teams <- dbReadTable(con, "Teams")
+series <- dbReadTable(con, "SeriesPost")
+
+ws <- subset(series, round == "WS")
+
+winners <- merge(ws, teams, 
+                 by.x = c("teamIDwinner", "yearID"), 
+                 by.y = c("teamID", "yearID"))
+
+losers <- merge(ws, teams, 
+                by.x = c("teamIDloser", "yearID"), 
+                by.y = c("teamID", "yearID"))
+
+# 4. Merge winner and loser info by year
+ws_combined <- merge(winners, losers, by = "yearID", suffixes = c("_winner", "_loser"))
+
+# 5. Select and rename relevant columns
+ws_results <- ws_combined[, c(
+  "yearID",
+  "name_winner", "lgID_winner", "divID_winner", "W_winner", "L_winner",
+  "name_loser", "lgID_loser", "divID_loser", "W_loser", "L_loser"
+)]
+
+names(ws_results) <- c(
+  "year",
+  "winner_name", "winner_league", "winner_division", "winner_wins", "winner_losses",
+  "loser_name", "loser_league", "loser_division", "loser_wins", "loser_losses"
+)
+
+ws_results <- ws_results[order(-ws_results$year), ]
+
+print(head(ws_results, 10))
+```
+
+The output is match the result that using SQL.
+
+
+
+Q6
+```{r}
+salaries <- dbReadTable(con, "Salaries")
+teams <- dbReadTable(con, "Teams")
+series <- dbReadTable(con, "SeriesPost")
+
+payroll_r <- aggregate(salary ~ yearID + teamID, data = salaries, sum)
+names(payroll_r)[3] <- "total_payroll"
+
+ws <- subset(series, round == "WS")
+
+payroll_r$key <- paste(payroll_r$yearID, payroll_r$teamID)
+ws$winner_key <- paste(ws$yearID, ws$teamIDwinner)
+ws$loser_key  <- paste(ws$yearID, ws$teamIDloser)
+
+payroll_r$world_series_result <- ifelse(
+  payroll_r$key %in% ws$winner_key, "Winner",
+  ifelse(payroll_r$key %in% ws$loser_key, "Loser", "No")
+)
+
+teams_unique <- unique(teams[, c("yearID", "teamID", "name")])
+payroll_labeled <- merge(payroll_r, teams_unique, by = c("yearID", "teamID"))
+
+payroll_output <- payroll_labeled[, c("yearID", "teamID", "name", "total_payroll", "world_series_result")]
+names(payroll_output)[3] <- "team_name"
+payroll_output <- payroll_output[order(payroll_output$yearID, -payroll_output$total_payroll), ]
+
+print(head(payroll_output, 10))
+```
+
+The output is match the result that using SQL.
+
+
+Q7
+```{r}
+college_playing <- dbReadTable(con, "CollegePlaying")
+people <- dbReadTable(con, "People")
+schools <- dbReadTable(con, "Schools")
+
+college_people <- merge(college_playing, people[, c("playerID", "debut")], by = "playerID")
+
+college_recent <- subset(college_people, debut >= "2000-01-01")
+
+college_info <- merge(college_recent, schools, by.x = "schoolID", by.y = "schoolID")
+
+college_counts <- aggregate(playerID ~ schoolID + name_full + city + state, college_info, function(x) length(unique(x)))
+names(college_counts)[5] <- "num_players"
+
+top_colleges <- college_counts[order(-college_counts$num_players), ][1:10, ]
+
+top_colleges <- top_colleges[, c("name_full", "city", "state", "num_players")]
+names(top_colleges)[1] <- "college_name"
+
+print(top_colleges)
+```
+
+
+The output is match the result that using SQL.
+
+
+Q8
+```{r}
+allstars <- dbReadTable(con, "AllstarFull")
+
+games_per_year <- aggregate(gameNum ~ yearID, data = allstars, function(x) length(unique(x)))
+names(games_per_year)[2] <- "num_allstar_games"
+
+players_per_game <- aggregate(playerID ~ yearID + gameNum, data = allstars, function(x) length(unique(x)))
+names(players_per_game)[3] <- "num_players"
+
+games_per_year <- games_per_year[order(games_per_year$yearID), ]
+players_per_game <- players_per_game[order(players_per_game$yearID, players_per_game$gameNum), ]
+
+print(head(games_per_year, 10))
+
+print(head(players_per_game, 10))
+```
+
+The output is match the result that using SQL.
+
+
+Q9
+```{r}
+allstars <- dbReadTable(con, "AllstarFull")
+people <- dbReadTable(con, "People")
+
+asg_counts <- aggregate(yearID ~ playerID, data = allstars, length)
+names(asg_counts)[2] <- "num_allstar_games"
+
+asg_15plus <- subset(asg_counts, num_allstar_games >= 15)
+
+first_last_years <- aggregate(yearID ~ playerID, data = allstars[allstars$playerID %in% asg_15plus$playerID, ],
+                               function(x) c(first = min(x), last = max(x)))
+first_last_years <- do.call(data.frame, first_last_years)
+names(first_last_years) <- c("playerID", "first_year", "last_year")
+
+summary_15plus <- merge(asg_15plus, first_last_years, by = "playerID")
+summary_named <- merge(summary_15plus, people[, c("playerID", "nameFirst", "nameLast")], by = "playerID")
+summary_named$name <- paste(summary_named$nameFirst, summary_named$nameLast)
+
+top_allstars_summary <- summary_named[, c("name", "num_allstar_games", "first_year", "last_year")]
+top_allstars_summary <- top_allstars_summary[order(-top_allstars_summary$num_allstar_games), ]
+
+print(top_allstars_summary)
+
+details_15plus <- subset(allstars, playerID %in% asg_15plus$playerID)
+details_named <- merge(details_15plus, people[, c("playerID", "nameFirst", "nameLast")], by = "playerID")
+details_named$name <- paste(details_named$nameFirst, details_named$nameLast)
+
+allstar_appearances <- details_named[, c("name", "yearID", "teamID")]
+allstar_appearances <- allstar_appearances[order(allstar_appearances$name, allstar_appearances$yearID), ]
+
+print(head(allstar_appearances, 10))
+```
+
+The output is match the result that using SQL.
+
+
+
+Q10
+```{r}
+batting_post <- dbReadTable(con, "BattingPost")
+people <- dbReadTable(con, "People")
+salaries <- dbReadTable(con, "Salaries")
+
+playoff_years <- aggregate(yearID ~ playerID, data = batting_post, function(x) length(unique(x)))
+names(playoff_years)[2] <- "num_playoff_years"
+
+first_last <- aggregate(yearID ~ playerID, data = batting_post, function(x) c(first = min(x), last = max(x)))
+first_last <- do.call(data.frame, first_last)
+names(first_last) <- c("playerID", "first_year", "last_year")
+
+num_teams <- aggregate(teamID ~ playerID, data = batting_post, function(x) length(unique(x)))
+names(num_teams)[2] <- "num_playoff_teams"
+
+avg_salary <- aggregate(salary ~ playerID, data = salaries, mean, na.rm = TRUE)
+names(avg_salary)[2] <- "avg_salary"
+
+merged1 <- merge(playoff_years, first_last, by = "playerID")
+merged2 <- merge(merged1, num_teams, by = "playerID")
+merged3 <- merge(merged2, avg_salary, by = "playerID", all.x = TRUE)
+final_stats <- merge(merged3, people[, c("playerID", "nameFirst", "nameLast")], by = "playerID")
+final_stats$name <- paste(final_stats$nameFirst, final_stats$nameLast)
+
+top_playoff_players <- final_stats[order(-final_stats$num_playoff_years), ]
+top_10 <- top_playoff_players[, c("name", "num_playoff_years", "first_year", "last_year", "num_playoff_teams", "avg_salary")][1:10, ]
+
+print(top_10)
+```
+
+The output is match the result that using SQL.
