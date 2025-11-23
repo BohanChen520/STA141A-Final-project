@@ -1,1 +1,1 @@
-# STA141A-Final-project
+# Acdemic project
